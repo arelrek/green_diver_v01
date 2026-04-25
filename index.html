@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Green Diver: Ocean Guardian</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #000d1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            border: 3px solid #0055aa;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 40px rgba(0, 100, 255, 0.3);
+        }
+    </style>
+</head>
+<body>
+<div id="game-container"></div>
+<script>
+
+/* ══════════════════════════════════════════════════════
+   CANVAS 스프라이트 드로잉
+   모든 텍스처를 Canvas API로 직접 생성 → 외부 파일 불필요
+══════════════════════════════════════════════════════ */
+
+// ────────────────────────────────────
+// 다이버 공통 몸통 (머리 → 오른쪽)
+// ────────────────────────────────────
+function drawDiverBase(ctx) {
+    // 공기 탱크 (맨 왼쪽)
+    ctx.fillStyle = '#2255bb';
+    ctx.beginPath(); ctx.roundRect(2, 16, 13, 20, 4); ctx.fill();
+    ctx.fillStyle = '#4477dd';
+    ctx.beginPath(); ctx.roundRect(4, 13, 9, 5, 2); ctx.fill(); // 밸브
+
+    // 탱크 하이라이트
+    ctx.fillStyle = '#6699ff';
+    ctx.globalAlpha = 0.4;
+    ctx.fillRect(5, 18, 4, 12);
+    ctx.globalAlpha = 1;
+
+    // 잠수복 몸통
+    ctx.fillStyle = '#004422';
+    ctx.beginPath();
+    ctx.ellipse(38, 28, 26, 13, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 잠수복 줄무늬
+    ctx.strokeStyle = '#006633';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(28, 17); ctx.lineTo(28, 39); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(36, 16); ctx.lineTo(36, 40); ctx.stroke();
+
+    // 공기 호스
+    ctx.strokeStyle = '#777';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(15, 25);
+    ctx.bezierCurveTo(28, 20, 48, 20, 62, 26);
+    ctx.stroke();
+
+    // 팔
+    ctx.strokeStyle = '#004422';
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(50, 23); ctx.lineTo(63, 13); ctx.stroke();
+    // 손
+    ctx.fillStyle = '#ffcc88';
+    ctx.beginPath(); ctx.arc(64, 12, 5, 0, Math.PI * 2); ctx.fill();
+
+    // 머리 (오른쪽)
+    ctx.fillStyle = '#ffcc88';
+    ctx.beginPath(); ctx.arc(70, 27, 12, 0, Math.PI * 2); ctx.fill();
+
+    // 헬멧 테두리
+    ctx.strokeStyle = '#cc8844';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(70, 27, 12, 0, Math.PI * 2); ctx.stroke();
+
+    // 고글 (마스크)
+    ctx.fillStyle = '#001a44';
+    ctx.beginPath(); ctx.ellipse(73, 25, 9, 7, 0.15, 0, Math.PI * 2); ctx.fill();
+
+    // 고글 렌즈 반사
+    ctx.fillStyle = '#3388cc';
+    ctx.globalAlpha = 0.75;
+    ctx.beginPath(); ctx.ellipse(73, 25, 7, 5, 0.15, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // 고글 반짝이
+    ctx.fillStyle = '#aaddff';
+    ctx.beginPath(); ctx.arc(71, 22, 2.5, 0, Math.PI * 2); ctx.fill();
+
+    // 긴 머리카락 (갈색, 머리 뒤로)
+    ctx.fillStyle = '#5c2d0a';
+    ctx.beginPath();
+    ctx.moveTo(64, 20);
+    ctx.bezierCurveTo(60, 15, 55, 22, 58, 35);
+    ctx.bezierCurveTo(60, 40, 63, 38, 65, 33);
+    ctx.bezierCurveTo(63, 28, 62, 22, 64, 20);
+    ctx.fill();
+}
+
+// ── 핀 프레임 A: 다리 벌어진 자세
+function drawDiverFinA(ctx) {
+    // 뒤쪽 다리 (아래)
+    ctx.fillStyle = '#002a1a';
+    ctx.beginPath(); ctx.ellipse(21, 40, 15, 6, 0.35, 0, Math.PI * 2); ctx.fill();
+    // 뒤쪽 핀
+    ctx.fillStyle = '#006622';
+    ctx.beginPath();
+    ctx.moveTo(8, 43); ctx.lineTo(-2, 52); ctx.lineTo(15, 47); ctx.closePath();
+    ctx.fill();
+
+    // 앞쪽 다리 (위)
+    ctx.fillStyle = '#003d22';
+    ctx.beginPath(); ctx.ellipse(21, 29, 15, 6, -0.35, 0, Math.PI * 2); ctx.fill();
+    // 앞쪽 핀
+    ctx.fillStyle = '#00aa44';
+    ctx.beginPath();
+    ctx.moveTo(8, 26); ctx.lineTo(-2, 17); ctx.lineTo(15, 23); ctx.closePath();
+    ctx.fill();
+}
+
+// ── 핀 프레임 B: 다리 교차된 자세
+function drawDiverFinB(ctx) {
+    // 뒤쪽 다리 (위)
+    ctx.fillStyle = '#002a1a';
+    ctx.beginPath(); ctx.ellipse(21, 27, 15, 6, -0.35, 0, Math.PI * 2); ctx.fill();
+    // 뒤쪽 핀
+    ctx.fillStyle = '#006622';
+    ctx.beginPath();
+    ctx.moveTo(8, 24); ctx.lineTo(-2, 15); ctx.lineTo(15, 21); ctx.closePath();
+    ctx.fill();
+
+    // 앞쪽 다리 (아래)
+    ctx.fillStyle = '#003d22';
+    ctx.beginPath(); ctx.ellipse(21, 38, 15, 6, 0.35, 0, Math.PI * 2); ctx.fill();
+    // 앞쪽 핀
+    ctx.fillStyle = '#00aa44';
+    ctx.beginPath();
+    ctx.moveTo(8, 41); ctx.lineTo(-2, 50); ctx.lineTo(15, 45); ctx.closePath();
+    ctx.fill();
+}
+
+function makeDiverFrame(fn, w, h) {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    fn(ctx);
+    drawDiverBase(ctx);
+    return c;
+}
+
+// ────────────────────────────────────
+// 산호 장애물 — 위에서 내려오는 타입
+// ────────────────────────────────────
+function makeCoralTop(w, h) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+
+    // 천장 바위
+    ctx.fillStyle = '#3a2a1a';
+    ctx.fillRect(0, 0, w, 20);
+    ctx.fillStyle = '#4d3a22';
+    ctx.fillRect(0, 14, w, 10);
+
+    // 산호 줄기 4개
+    const cols = [
+        { x: w*0.18, color: '#ff3355', gh: '#ff6688', stemH: h*0.62 },
+        { x: w*0.40, color: '#ff6600', gh: '#ffaa44', stemH: h*0.78 },
+        { x: w*0.62, color: '#ff3355', gh: '#ff6688', stemH: h*0.68 },
+        { x: w*0.83, color: '#ffbb00', gh: '#ffdd66', stemH: h*0.55 },
+    ];
+    cols.forEach(b => {
+        // 줄기
+        const grad = ctx.createLinearGradient(b.x, 20, b.x, 20 + b.stemH);
+        grad.addColorStop(0, b.color);
+        grad.addColorStop(1, b.gh);
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(b.x, 20); ctx.lineTo(b.x, 20 + b.stemH); ctx.stroke();
+
+        // 가지 2개
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = b.gh;
+        ctx.beginPath(); ctx.moveTo(b.x, 20 + b.stemH * 0.38);
+        ctx.lineTo(b.x - 11, 20 + b.stemH * 0.62); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(b.x, 20 + b.stemH * 0.58);
+        ctx.lineTo(b.x + 11, 20 + b.stemH * 0.80); ctx.stroke();
+
+        // 끝 포자 구슬
+        ctx.fillStyle = b.gh;
+        [-5, 0, 5].forEach(dx => {
+            ctx.beginPath();
+            ctx.arc(b.x + dx, 20 + b.stemH, 4.5, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    });
+    return c;
+}
+
+// ────────────────────────────────────
+// 산호 장애물 — 아래에서 올라오는 타입
+// ────────────────────────────────────
+function makeCoralBottom(w, h) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+
+    // 바닥 바위
+    ctx.fillStyle = '#3a2a1a';
+    ctx.fillRect(0, h - 20, w, 20);
+    ctx.fillStyle = '#4d3a22';
+    ctx.fillRect(0, h - 28, w, 12);
+
+    const cols = [
+        { x: w*0.18, color: '#ff3355', gh: '#ff6688', stemH: h*0.62 },
+        { x: w*0.40, color: '#ff6600', gh: '#ffaa44', stemH: h*0.78 },
+        { x: w*0.62, color: '#ff3355', gh: '#ff6688', stemH: h*0.68 },
+        { x: w*0.83, color: '#ffbb00', gh: '#ffdd66', stemH: h*0.55 },
+    ];
+    cols.forEach(b => {
+        const grad = ctx.createLinearGradient(b.x, h - 20, b.x, h - 20 - b.stemH);
+        grad.addColorStop(0, b.color);
+        grad.addColorStop(1, b.gh);
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(b.x, h - 20); ctx.lineTo(b.x, h - 20 - b.stemH); ctx.stroke();
+
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = b.gh;
+        ctx.beginPath(); ctx.moveTo(b.x, h - 20 - b.stemH * 0.38);
+        ctx.lineTo(b.x - 11, h - 20 - b.stemH * 0.62); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(b.x, h - 20 - b.stemH * 0.58);
+        ctx.lineTo(b.x + 11, h - 20 - b.stemH * 0.80); ctx.stroke();
+
+        ctx.fillStyle = b.gh;
+        [-5, 0, 5].forEach(dx => {
+            ctx.beginPath();
+            ctx.arc(b.x + dx, h - 20 - b.stemH, 4.5, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    });
+    return c;
+}
+
+// ────────────────────────────────────
+// 해초 장애물 — 위에서 내려오는 타입
+// ────────────────────────────────────
+function makeWeedTop(w, h) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+
+    ctx.fillStyle = '#2a3a1a';
+    ctx.fillRect(0, 0, w, 12);
+
+    const weeds = [
+        { x: w*0.2, amp: 8,  period: 0.05, len: h*0.7, color: '#1a4d2a' },
+        { x: w*0.5, amp: 10, period: 0.04, len: h*0.9, color: '#265c33' },
+        { x: w*0.8, amp: 7,  period: 0.06, len: h*0.75, color: '#1a4d2a' },
+    ];
+    weeds.forEach(w2 => {
+        ctx.strokeStyle = w2.color;
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(w2.x, 12);
+        for (let y = 12; y < 12 + w2.len; y += 3) {
+            const x = w2.x + Math.sin(y * w2.period) * w2.amp;
+            ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        // 잎
+        ctx.fillStyle = w2.color;
+        ctx.beginPath();
+        const tipX = w2.x + Math.sin((12 + w2.len) * w2.period) * w2.amp;
+        ctx.ellipse(tipX, 12 + w2.len, 8, 4, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    return c;
+}
+
+// ────────────────────────────────────
+// 배경 장식 산호
+// ────────────────────────────────────
+function makeCoralDeco(w, h) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+
+    ctx.fillStyle = '#4a3822';
+    ctx.beginPath();
+    ctx.ellipse(w/2, h - 6, w/2 - 2, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const cols = [
+        { x: w*0.25, color: '#cc2244', h: h * 0.65 },
+        { x: w*0.5,  color: '#ff4422', h: h * 0.85 },
+        { x: w*0.75, color: '#cc2244', h: h * 0.70 },
+    ];
+    cols.forEach(b => {
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 3.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(b.x, h - 10); ctx.lineTo(b.x, h - 10 - b.h); ctx.stroke();
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(b.x, h - 10 - b.h * 0.5);
+        ctx.lineTo(b.x - 7, h - 10 - b.h * 0.73); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(b.x, h - 10 - b.h * 0.68);
+        ctx.lineTo(b.x + 7, h - 10 - b.h * 0.87); ctx.stroke();
+        ctx.fillStyle = b.color;
+        ctx.beginPath(); ctx.arc(b.x, h - 10 - b.h, 3.5, 0, Math.PI * 2); ctx.fill();
+    });
+    return c;
+}
+
+// ────────────────────────────────────
+// 거북이 (오른쪽 방향)
+// ────────────────────────────────────
+function makeTurtle(w, h) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+
+    // 지느러미 (먼저 그려서 껍질 뒤에)
+    ctx.fillStyle = '#3a7a3a';
+    [[8,9],[8,27],[30,9],[30,27]].forEach(([fx,fy]) => {
+        ctx.beginPath();
+        ctx.ellipse(fx, fy, 9, 5, fy < 18 ? -0.5 : 0.5, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    // 등껍질
+    const shellGrad = ctx.createRadialGradient(20, 17, 2, 20, 17, 16);
+    shellGrad.addColorStop(0, '#4a9e4a');
+    shellGrad.addColorStop(1, '#2a5e2a');
+    ctx.fillStyle = shellGrad;
+    ctx.beginPath(); ctx.ellipse(20, 18, 16, 12, 0, 0, Math.PI * 2); ctx.fill();
+
+    // 껍질 무늬
+    ctx.strokeStyle = '#1e4a1e';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(20, 18, 9, 7, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(20,11); ctx.lineTo(20,25); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(12,18); ctx.lineTo(28,18); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(14,13); ctx.lineTo(26,23); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(26,13); ctx.lineTo(14,23); ctx.stroke();
+
+    // 머리 (오른쪽)
+    ctx.fillStyle = '#4a8c4a';
+    ctx.beginPath(); ctx.ellipse(35, 18, 9, 7, 0, 0, Math.PI * 2); ctx.fill();
+
+    // 눈
+    ctx.fillStyle = '#111';
+    ctx.beginPath(); ctx.arc(38, 15, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(39, 14, 0.9, 0, Math.PI * 2); ctx.fill();
+
+    // 입
+    ctx.strokeStyle = '#2a5c2a';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(37, 20, 3, 0, Math.PI * 0.7); ctx.stroke();
+
+    return c;
+}
+
+// ────────────────────────────────────
+// 돌고래 (오른쪽 방향)
+// ────────────────────────────────────
+function makeDolphin(w, h) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+
+    // 꼬리 (왼쪽)
+    ctx.fillStyle = '#3d88aa';
+    ctx.beginPath();
+    ctx.moveTo(10, 21);
+    ctx.lineTo(0, 13); ctx.lineTo(6, 21);
+    ctx.lineTo(0, 29); ctx.closePath();
+    ctx.fill();
+
+    // 몸통
+    const bodyGrad = ctx.createLinearGradient(10, 10, 10, 32);
+    bodyGrad.addColorStop(0, '#6aadcc');
+    bodyGrad.addColorStop(1, '#4488aa');
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.moveTo(10, 21);
+    ctx.bezierCurveTo(18, 9, 55, 8, 73, 20);
+    ctx.bezierCurveTo(68, 30, 18, 33, 10, 21);
+    ctx.fill();
+
+    // 배 (밝은 색)
+    ctx.fillStyle = '#c8eef8';
+    ctx.beginPath(); ctx.ellipse(38, 23, 21, 8, 0, 0, Math.PI * 2); ctx.fill();
+
+    // 등 지느러미
+    ctx.fillStyle = '#3d88aa';
+    ctx.beginPath();
+    ctx.moveTo(40, 10); ctx.lineTo(48, 2); ctx.lineTo(54, 10); ctx.closePath();
+    ctx.fill();
+
+    // 주둥이
+    ctx.fillStyle = '#5599bb';
+    ctx.beginPath(); ctx.ellipse(80, 21, 11, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(88, 21); ctx.lineTo(98, 23); ctx.lineTo(88, 25); ctx.closePath();
+    ctx.fill();
+
+    // 눈
+    ctx.fillStyle = '#111';
+    ctx.beginPath(); ctx.arc(78, 17, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(79, 16, 1.2, 0, Math.PI * 2); ctx.fill();
+
+    // 미소
+    ctx.strokeStyle = '#3377aa';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.arc(82, 23, 4, 0, Math.PI * 0.65); ctx.stroke();
+
+    return c;
+}
+
+// ────────────────────────────────────
+// 쓰레기 3종
+// ────────────────────────────────────
+function makeTrashBottle(w, h) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    // 병
+    ctx.fillStyle = '#77bbee'; ctx.globalAlpha = 0.82;
+    ctx.beginPath(); ctx.roundRect(3, 8, 14, 20, 3); ctx.fill(); ctx.globalAlpha = 1;
+    // 목
+    ctx.fillStyle = '#55aadd'; ctx.globalAlpha = 0.9;
+    ctx.fillRect(6, 4, 8, 6); ctx.globalAlpha = 1;
+    // 뚜껑
+    ctx.fillStyle = '#ee3333';
+    ctx.beginPath(); ctx.roundRect(5, 1, 10, 5, 2); ctx.fill();
+    // 라벨
+    ctx.fillStyle = '#ffffff44'; ctx.fillRect(4, 13, 12, 8);
+    // 테두리
+    ctx.strokeStyle = '#3388bb'; ctx.lineWidth = 1; ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.roundRect(3, 8, 14, 20, 3); ctx.stroke(); ctx.globalAlpha = 1;
+    return c;
+}
+
+function makeTrashBag(w, h) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    // 봉투
+    ctx.fillStyle = '#555566'; ctx.globalAlpha = 0.9;
+    ctx.beginPath(); ctx.moveTo(4, 8); ctx.bezierCurveTo(4, 4, 16, 4, 16, 8);
+    ctx.lineTo(18, 26); ctx.bezierCurveTo(18, 29, 2, 29, 2, 26); ctx.closePath();
+    ctx.fill(); ctx.globalAlpha = 1;
+    // 매듭
+    ctx.fillStyle = '#333344';
+    ctx.beginPath(); ctx.arc(10, 8, 4, 0, Math.PI * 2); ctx.fill();
+    // 주름
+    ctx.strokeStyle = '#888899'; ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.moveTo(6, 14); ctx.lineTo(5, 25); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(14, 13); ctx.lineTo(15, 24); ctx.stroke();
+    ctx.globalAlpha = 1;
+    return c;
+}
+
+function makeTrashCan(w, h) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    // 캔 몸통
+    const grad = ctx.createLinearGradient(2, 0, w - 2, 0);
+    grad.addColorStop(0, '#aabbcc'); grad.addColorStop(0.4, '#ddeeff'); grad.addColorStop(1, '#8899aa');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.roundRect(2, 6, 16, 22, 3); ctx.fill();
+    // 상단 원형
+    ctx.fillStyle = '#ccddef';
+    ctx.beginPath(); ctx.ellipse(10, 6, 8, 3, 0, 0, Math.PI * 2); ctx.fill();
+    // 라벨
+    ctx.fillStyle = '#ffffff55'; ctx.fillRect(3, 12, 14, 10);
+    ctx.fillStyle = '#ff3333'; ctx.globalAlpha = 0.7;
+    ctx.fillRect(4, 15, 12, 3); ctx.globalAlpha = 1;
+    // 링 풀탭
+    ctx.strokeStyle = '#aaa'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(10, 5, 3, Math.PI, 0); ctx.stroke();
+    return c;
+}
+
+/* ══════════════════════════════════════════════════════
+   PHASER 설정 & 게임 상수
+══════════════════════════════════════════════════════ */
+const GW = 800, GH = 450;
+const OBS_W = 80, OBS_H = 150;      // 장애물 박스 크기
+const GRAVITY  = 520;
+const JUMP_V   = -300;
+const INIT_SPEED = -210;
+
+const phaserConfig = {
+    type: Phaser.AUTO,
+    width: GW,
+    height: GH,
+    parent: 'game-container',
+    backgroundColor: '#002244',
+    physics: {
+        default: 'arcade',
+        arcade: { gravity: { y: 0 }, debug: false }   // 중력 0 → 수동 관리
+    },
+    scene: { preload, create, update }
+};
+
+/* ── 게임 상태 변수 ── */
+let player, companion, trashGroup, obstacleGroup;
+let o2Bar, ecoBar, scoreText, gameOverText, powerText;
+let o2Value, ecoValue, score;
+let isInvincible, moveSpeed, playerVY;
+let gameActive;
+let finTimer, finFrame;
+let bubbles, bubbleTimer;
+
+const game = new Phaser.Game(phaserConfig);
+
+/* ══════════════════════════════════════════════════════
+   PRELOAD — 텍스처를 Canvas로 생성 후 등록
+══════════════════════════════════════════════════════ */
+function preload() {
+    const reg = (key, canvas) => this.textures.addCanvas(key, canvas);
+
+    reg('diver_a',        makeDiverFrame(drawDiverFinA, 86, 56));
+    reg('diver_b',        makeDiverFrame(drawDiverFinB, 86, 56));
+    reg('coral_top',      makeCoralTop(OBS_W, OBS_H));
+    reg('coral_bottom',   makeCoralBottom(OBS_W, OBS_H));
+    reg('weed_top',       makeWeedTop(50, OBS_H));
+    reg('coral_deco',     makeCoralDeco(52, 80));
+    reg('turtle',         makeTurtle(50, 38));
+    reg('dolphin',        makeDolphin(100, 42));
+    reg('trash_bottle',   makeTrashBottle(20, 30));
+    reg('trash_bag',      makeTrashBag(20, 30));
+    reg('trash_can',      makeTrashCan(20, 30));
+}
+
+/* ══════════════════════════════════════════════════════
+   CREATE
+══════════════════════════════════════════════════════ */
+function create() {
+    initState();
+
+    // ── 배경 (그라데이션 효과: 2색 사각형 분할) ──
+    this.add.rectangle(GW/2, GH*0.25, GW, GH*0.5, 0x001a3e).setDepth(-10);
+    this.add.rectangle(GW/2, GH*0.75, GW, GH*0.5, 0x003366).setDepth(-10);
+
+    // 배경 빛줄기 (분위기 연출)
+    const rayGfx = this.add.graphics().setDepth(-9).setAlpha(0.06);
+    for (let i = 0; i < 6; i++) {
+        rayGfx.fillStyle(0xaaddff, 1);
+        rayGfx.fillTriangle(
+            100 + i * 130, 0,
+            80  + i * 130, 0,
+            50  + i * 130, GH
+        );
+    }
+
+    // 배경 장식 산호
+    [70, 210, 370, 530, 680, 790].forEach((x, i) => {
+        this.add.image(x, GH - 5, 'coral_deco')
+            .setOrigin(0.5, 1)
+            .setAlpha(0.4)
+            .setScale(0.55 + (i % 3) * 0.22)
+            .setDepth(1);
+    });
+
+    // 바닥
+    this.add.rectangle(GW/2, GH - 8, GW, 16, 0x2a1a0a).setDepth(2);
+
+    // ── 그룹 ──
+    obstacleGroup = this.physics.add.staticGroup();
+    trashGroup    = this.physics.add.group();
+
+    // ── 플레이어 ──
+    player = this.add.image(130, GH/2, 'diver_a').setDepth(10);
+
+    // ── UI ──
+    buildUI.call(this);
+
+    // ── 입력 ──
+    this.input.on('pointerdown', () => {
+        if (!gameActive) { restartGame.call(this); return; }
+        kick();
+    });
+    this.input.keyboard.on('keydown-SPACE', () => {
+        if (!gameActive) { restartGame.call(this); return; }
+        kick();
+    });
+
+    // ── 타이머 ──
+    this.time.addEvent({ delay: 1600,  callback: spawnTrash,    callbackScope: this, loop: true });
+    this.time.addEvent({ delay: 2400,  callback: spawnObstacle, callbackScope: this, loop: true });
+    this.time.addEvent({ delay: 8000,  callback: speedUp,       callbackScope: this, loop: true });
+    this.time.addEvent({ delay: 3500,  callback: spawnBgFish,   callbackScope: this, loop: true });
+
+    // ── 충돌 (16ms 폴링) ──
+    this.time.addEvent({ delay: 16, callback: checkCollisions, callbackScope: this, loop: true });
+}
+
+function buildUI() {
+    const D = 20;
+
+    // O2 바
+    this.add.rectangle(12, 12, 206, 24, 0x001133, 0.8).setOrigin(0).setDepth(D);
+    o2Bar = this.add.rectangle(13, 13, 202, 22, 0x44aaff).setOrigin(0).setDepth(D);
+    this.add.text(224, 11, 'O₂', { fontSize: '14px', fill: '#aaddff', fontStyle: 'bold' }).setDepth(D);
+
+    // ECO 바
+    this.add.rectangle(12, 42, 206, 18, 0x001133, 0.8).setOrigin(0).setDepth(D);
+    ecoBar = this.add.rectangle(13, 43, 0, 16, 0x00ff88).setOrigin(0).setDepth(D);
+    this.add.text(224, 41, 'ECO', { fontSize: '12px', fill: '#88ffcc', fontStyle: 'bold' }).setDepth(D);
+
+    // 스코어
+    scoreText = this.add.text(12, 67, 'SCORE  0', {
+        fontSize: '18px', fill: '#ffffff',
+        stroke: '#001133', strokeThickness: 3
+    }).setDepth(D);
+
+    // 파워업 알림
+    powerText = this.add.text(GW / 2, 30, '', {
+        fontSize: '16px', fill: '#ffff44',
+        stroke: '#000', strokeThickness: 3,
+        align: 'center'
+    }).setOrigin(0.5, 0).setDepth(D);
+
+    // 조작 안내
+    this.add.text(GW - 10, 10, 'SPACE / 탭 : 위로', {
+        fontSize: '12px', fill: '#667799'
+    }).setOrigin(1, 0).setDepth(D);
+
+    // 게임오버 텍스트
+    gameOverText = this.add.text(GW/2, GH/2, '', {
+        fontSize: '28px', fill: '#ffffff',
+        backgroundColor: '#00000099',
+        padding: { x: 28, y: 16 },
+        align: 'center'
+    }).setOrigin(0.5).setDepth(30);
+}
+
+function initState() {
+    o2Value      = 100;
+    ecoValue     = 0;
+    score        = 0;
+    isInvincible = false;
+    moveSpeed    = INIT_SPEED;
+    playerVY     = 0;
+    gameActive   = true;
+    finTimer     = 0;
+    finFrame     = 0;
+    bubbles      = [];
+    bubbleTimer  = 0;
+}
+
+/* ══════════════════════════════════════════════════════
+   UPDATE
+══════════════════════════════════════════════════════ */
+function update(time, delta) {
+    if (!gameActive) return;
+    const dt = delta / 1000;
+
+    // ── 플레이어 물리 (수동) ──
+    playerVY += GRAVITY * dt;
+    player.y  = Phaser.Math.Clamp(player.y + playerVY * dt, 26, GH - 24);
+    if (player.y <= 26 || player.y >= GH - 24) playerVY = 0;
+
+    // ── 핀 교차 애니메이션 ──
+    finTimer += delta;
+    if (finTimer >= 190) {
+        finTimer = 0;
+        finFrame = 1 - finFrame;
+        player.setTexture(finFrame === 0 ? 'diver_a' : 'diver_b');
+    }
+
+    // ── 기울기 ──
+    player.setAngle(Phaser.Math.Clamp(playerVY * 0.038, -20, 20));
+
+    // ── O2 ──
+    o2Value -= isInvincible ? 0.018 : 0.04;
+    o2Bar.width = Math.max(0, (o2Value / 100) * 202);
+    if      (o2Value < 25) o2Bar.setFillStyle(0xff2200);
+    else if (o2Value < 55) o2Bar.setFillStyle(0xffaa00);
+    else                   o2Bar.setFillStyle(0x44aaff);
+    if (o2Value <= 0) { gameOver.call(this, 'OUT OF O₂'); return; }
+
+    // ── 동반 생물 위치 ──
+    if (companion && companion.active) {
+        companion.x = player.x + 12;
+        companion.y += (player.y + 52 - companion.y) * 0.12;
+    }
+
+    // ── 장애물 이동 (staticBody 수동 이동) ──
+    obstacleGroup.getChildren().forEach(obs => {
+        obs.x += moveSpeed * dt;
+        obs.body.reset(obs.x, obs.y);
+        if (obs.x < -(OBS_W + 20)) obs.destroy();
+    });
+
+    // ── 쓰레기 화면 밖 정리 ──
+    trashGroup.getChildren().forEach(t => {
+        if (t.active && t.x < -30) t.destroy();
+    });
+
+    // ── 버블 ──
+    bubbleTimer += delta;
+    if (bubbleTimer > 260) {
+        bubbleTimer = 0;
+        const b = this.add.circle(
+            player.x - 38 + Math.random() * 12,
+            player.y - 10,
+            1.5 + Math.random() * 3,
+            0xaaddff, 0.5
+        ).setDepth(8);
+        bubbles.push(b);
+    }
+    bubbles = bubbles.filter(b => {
+        if (!b.active) return false;
+        b.y -= 0.85;
+        b.setAlpha(b.alpha - 0.005);
+        if (b.alpha <= 0) { b.destroy(); return false; }
+        return true;
+    });
+}
+
+/* ══════════════════════════════════════════════════════
+   게임 로직
+══════════════════════════════════════════════════════ */
+function kick() {
+    playerVY = JUMP_V;
+}
+
+function speedUp() {
+    if (!gameActive) return;
+    moveSpeed = Math.max(-400, moveSpeed - 12);
+}
+
+// ── AABB 충돌 체크 ──
+function checkCollisions() {
+    if (!gameActive) return;
+    const px = player.x, py = player.y;
+    const pw = 54, ph = 26;
+
+    // 쓰레기 수집
+    trashGroup.getChildren().slice().forEach(t => {
+        if (!t.active) return;
+        if (Math.abs(px - t.x) < pw/2 + 11 && Math.abs(py - t.y) < ph/2 + 13) {
+            collectTrash.call(this, t);
+        }
+    });
+
+    // 장애물 충돌
+    if (isInvincible) return;
+    obstacleGroup.getChildren().forEach(obs => {
+        if (!obs.active) return;
+        // obs 이미지 원점 = 중심
+        const ow = OBS_W * 0.68, oh = OBS_H * 0.72;
+        if (Math.abs(px - obs.x) < pw/2 + ow/2 - 8 &&
+            Math.abs(py - obs.y) < ph/2 + oh/2 - 8) {
+            gameOver.call(this, 'COLLISION!');
+        }
+    });
+}
+
+// ── 쓰레기 스폰 (3종 랜덤) ──
+function spawnTrash() {
+    if (!gameActive) return;
+    const types = ['trash_bottle', 'trash_bag', 'trash_can'];
+    const key = types[Math.floor(Math.random() * types.length)];
+    const t = this.physics.add.image(GW + 15, Phaser.Math.Between(55, GH - 50), key).setDepth(6);
+    t.body.setAllowGravity(false);
+    t.body.setVelocityX(moveSpeed);
+    t.setRotation(Math.random() * Math.PI * 2);
+    trashGroup.add(t);
+}
+
+// ── 장애물 스폰 (산호 위/아래, 해초 위) ──
+function spawnObstacle() {
+    if (!gameActive) return;
+
+    const roll = Math.random();
+    let obs;
+
+    if (roll < 0.38) {
+        // 천장 산호
+        obs = this.add.image(GW + OBS_W/2, OBS_H/2, 'coral_top').setDepth(4);
+        obs.customH = OBS_H;
+    } else if (roll < 0.76) {
+        // 바닥 산호
+        obs = this.add.image(GW + OBS_W/2, GH - OBS_H/2, 'coral_bottom').setDepth(4);
+        obs.customH = OBS_H;
+    } else {
+        // 천장 해초
+        obs = this.add.image(GW + 25, OBS_H/2 - 10, 'weed_top').setDepth(4);
+        obs.customH = OBS_H - 20;
+    }
+
+    this.physics.add.existing(obs, true);   // staticBody
+    obstacleGroup.add(obs);
+}
+
+// ── 배경 꾸밈 물고기 ──
+function spawnBgFish() {
+    if (!gameActive) return;
+    const colors = [0xffaa44, 0xff6688, 0xaaffee, 0xffff88, 0xff88cc, 0x88ffcc];
+    const y = Phaser.Math.Between(40, GH - 45);
+    const r = 4 + Math.random() * 5;
+    const fish = this.add.circle(GW + 10, y, r,
+        colors[Math.floor(Math.random() * colors.length)], 0.55).setDepth(3);
+    this.tweens.add({
+        targets: fish, x: -20,
+        duration: 5000 + Math.random() * 4000,
+        onComplete: () => fish.destroy()
+    });
+}
+
+// ── 쓰레기 수집 ──
+function collectTrash(t) {
+    const tx = t.x, ty = t.y;
+    t.destroy();
+    score += 100;
+    scoreText.setText('SCORE  ' + score);
+
+    ecoValue = Math.min(200, ecoValue + 40);
+    ecoBar.width = (ecoValue / 200) * 202;
+    o2Value = Math.min(100, o2Value + 5);
+
+    // 수집 이펙트
+    const flash = this.add.circle(tx, ty, 14, 0xffffff, 0.8).setDepth(12);
+    this.tweens.add({
+        targets: flash, scaleX: 3, scaleY: 3, alpha: 0, duration: 260,
+        onComplete: () => flash.destroy()
+    });
+
+    // 점수 팝업
+    const popup = this.add.text(tx, ty - 10, '+100', {
+        fontSize: '14px', fill: '#ffff88',
+        stroke: '#333', strokeThickness: 2
+    }).setOrigin(0.5).setDepth(13);
+    this.tweens.add({
+        targets: popup, y: ty - 40, alpha: 0, duration: 700,
+        onComplete: () => popup.destroy()
+    });
+
+    if (ecoValue >= 200) activateCompanion.call(this);
+}
+
+// ── 컴패니언 소환 ──
+function activateCompanion() {
+    ecoValue = 0;
+    ecoBar.width = 0;
+    if (companion && companion.active) companion.destroy();
+
+    const isTurtle = Math.random() > 0.5;
+    companion = this.add.image(player.x + 12, player.y + 55,
+        isTurtle ? 'turtle' : 'dolphin'
+    ).setDepth(9).setAlpha(0);
+    this.tweens.add({ targets: companion, alpha: 1, duration: 500 });
+
+    if (isTurtle) {
+        // 거북이: 무적 6초 + O2 소모 반감
+        isInvincible = true;
+        player.setTint(0x88ffdd);
+        showPowerText.call(this, '🐢 거북이 등장! 무적 6초');
+        this.time.delayedCall(6000, () => {
+            isInvincible = false;
+            player.clearTint();
+            if (companion && companion.active) { companion.destroy(); companion = null; }
+            showPowerText.call(this, '');
+        });
+    } else {
+        // 돌고래: O2 대량 회복 + 속도 일시 증가
+        o2Value = Math.min(100, o2Value + 45);
+        showPowerText.call(this, '🐬 돌고래 등장! O₂ 회복!');
+        this.time.delayedCall(4000, () => {
+            if (companion && companion.active) { companion.destroy(); companion = null; }
+            showPowerText.call(this, '');
+        });
+    }
+}
+
+function showPowerText(msg) {
+    powerText.setText(msg);
+}
+
+// ── 장애물 충돌 ──
+function hitObstacle() {
+    if (isInvincible) return;
+    gameOver.call(this, 'COLLISION!');
+}
+
+// ── 게임오버 ──
+function gameOver(reason) {
+    if (!gameActive) return;
+    gameActive = false;
+
+    player.clearTint();
+    player.setTint(0xff3333);
+    playerVY = 0;
+    this.cameras.main.shake(350, 0.013);
+
+    // 장애물/쓰레기 정지
+    trashGroup.getChildren().forEach(t => { if (t.body) t.body.setVelocity(0, 0); });
+    obstacleGroup.getChildren().forEach(o => { if (o.body) o.body.setVelocity(0, 0); });
+
+    gameOverText.setText(
+        (reason || 'GAME OVER') +
+        '\n\nSCORE  ' + score +
+        '\n\n클릭 / SPACE 로 재시작'
+    );
+}
+
+// ── 재시작 ──
+function restartGame() {
+    // 기존 오브젝트 정리
+    if (companion && companion.active) { companion.destroy(); companion = null; }
+    bubbles.forEach(b => { if (b.active) b.destroy(); });
+
+    trashGroup.clear(true, true);
+    obstacleGroup.clear(true, true);
+
+    initState();
+
+    // UI 리셋
+    o2Bar.width = 202;
+    o2Bar.setFillStyle(0x44aaff);
+    ecoBar.width = 0;
+    scoreText.setText('SCORE  0');
+    gameOverText.setText('');
+    powerText.setText('');
+
+    // 플레이어 리셋
+    player.setPosition(130, GH/2);
+    player.setAngle(0);
+    player.setTexture('diver_a');
+    player.clearTint();
+}
+</script>
+</body>
+</html>
