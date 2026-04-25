@@ -529,12 +529,14 @@ const game = new Phaser.Game(phaserConfig);
    PRELOAD — 텍스처를 Canvas로 생성 후 등록
 ══════════════════════════════════════════════════════ */
 function preload() {
-//    const reg = (key, canvas) => this.textures.addCanvas(key, canvas);
     this.load.image('diver', 'assets/diver.png');
 }
 
 function create() {
-    this.add.image(200, 300, 'diver');
+    const diver = this.physics.add.sprite(200, 300, 'diver');
+
+    diver.setVelocity(100, 0); // 테스트
+}
 
     //reg('diver_a',        makeDiverFrame(drawDiverFinA, 86, 56));
     //reg('diver_b',        makeDiverFrame(drawDiverFinB, 86, 56));
