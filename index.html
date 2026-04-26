@@ -2,10 +2,11 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Green Diver FINAL</title>
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
 <style>
-body { margin:0; background:#000; }
+body { margin:0; padding:0; background:#000; overflow:hidden; }
 </style>
 </head>
 <body>
@@ -21,20 +22,24 @@ let playerVY=0;
 let baseSpeed=2;
 let speedBoost=0;
 
-let hp=100, eco=0;
+let hp=100, eco=0, score=0;
 let isGameOver=false;
 
 let turtle=null, dolphin=null;
 let turtleHP=0, dolphinHP=0;
 
 let hpBar, ecoBar;
-let gameOverText;
+let gameOverText, scoreText;
 
 /* ================= CONFIG ================= */
 const config = {
     type: Phaser.AUTO,
-    width: GW,
-    height: GH,
+    scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        width: GW,
+        height: GH
+    },
     scene: { preload, create, update }
 };
 
@@ -75,14 +80,24 @@ function create(){
     hpBar=this.add.rectangle(20,20,200,15,0x00ffcc).setOrigin(0);
     ecoBar=this.add.rectangle(20,40,0,10,0x00ff88).setOrigin(0);
 
+    scoreText=this.add.text(GW-20,20,'SCORE: 0',{
+        fontSize:'24px', fill:'#fff', fontStyle:'bold'
+    }).setOrigin(1,0);
+
     gameOverText=this.add.text(GW/2,GH/2,'',{
-        fontSize:'32px', fill:'#fff'
+        fontSize:'32px', fill:'#fff', align:'center'
     }).setOrigin(0.5);
 
     cursors=this.input.keyboard.createCursorKeys();
 
-    this.input.on('pointerdown',()=>jump());
-    this.input.keyboard.on('keydown-SPACE',()=>jump());
+    this.input.on('pointerdown',()=>{
+        if(isGameOver) restartGame.call(this);
+        else jump();
+    });
+    this.input.keyboard.on('keydown-SPACE',()=>{
+        if(isGameOver) restartGame.call(this);
+        else jump();
+    });
     this.input.keyboard.on('keydown-R',()=>restartGame.call(this));
 
     this.time.addEvent({delay:1200, callback:spawnObstacle, callbackScope:this, loop:true});
@@ -97,6 +112,10 @@ function update(time,delta){
     const dt=delta/1000;
     const speed = baseSpeed + speedBoost;
 
+    // 점수 증가 (생존 시)
+    score += dt * 10;
+    scoreText.setText('SCORE: ' + Math.floor(score));
+
     this.bg1.tilePositionX += 0.2;
     this.bg2.tilePositionX += 0.5;
     this.bg3.tilePositionX += 1;
@@ -104,7 +123,6 @@ function update(time,delta){
     playerVY+=500*dt;
     player.y+=playerVY*dt;
 
-    // 화면 밖으로 나가면 즉사 처리
     if(player.y < 0 || player.y > GH){
         hp = 0;
         gameOver();
@@ -114,7 +132,7 @@ function update(time,delta){
 
     obstacles.getChildren().forEach(o=>{
         o.x -= speed * o.speed;
-        if(collide(player,o)) hitObstacle();
+        if(collide(player,o)) hitObstacle(o); // 장애물 객체 전달
         if(o.x<-50) o.destroy();
     });
 
@@ -123,6 +141,7 @@ function update(time,delta){
         if(collide(player,t)){
             t.destroy();
             eco=Math.min(100,eco+20);
+            score += 100; // 쓰레기 획득 시 점수 증가
         }
     });
 
@@ -148,12 +167,21 @@ function collide(a,b){
 }
 
 function damage(d){
-    if(eco>0){ eco-=d; return; }
-    hp-=d;
+    // eco바 먼저 감소 로직
+    if(eco >= d){
+        eco -= d;
+    } else {
+        let remainingDamage = d - eco;
+        eco = 0;
+        hp -= remainingDamage;
+    }
+    
     if(hp<=0) gameOver();
 }
 
-function hitObstacle(){
+function hitObstacle(o){
+    o.destroy(); // 중복 타격 방지를 위해 충돌 시 장애물 즉시 파괴
+
     if(turtle){
         turtleHP--;
         if(turtleHP<=0){ turtle.destroy(); turtle=null; }
@@ -168,7 +196,7 @@ function hitObstacle(){
         }
         return;
     }
-    damage(10);
+    damage(10); // 체력 바의 10% 감소 (100 기준 10)
 }
 
 function applyItem(type){
@@ -189,7 +217,6 @@ function spawnObstacle(){
     const types=['coral1','coral2','coral3','weed'];
     const key=Phaser.Utils.Array.GetRandom(types);
 
-    // 수초는 상단(50), 산호는 하단(GH-50)으로 Y축 위치 고정
     const y = key === 'weed' ? 50 : GH - 50;
 
     const o=this.add.image(GW+50,y,key);
@@ -218,17 +245,18 @@ function jump(){
 
 function gameOver(){
     isGameOver=true;
-    gameOverText.setText('GAME OVER\nR to Restart');
+    gameOverText.setText('GAME OVER\nTap or Press R to Restart');
 }
 
 function restartGame(){
     this.scene.restart();
     hp=100;
     eco=0;
+    score=0;
     speedBoost=0;
     turtle=null;
     dolphin=null;
-    isGameOver=false; // 게임오버 상태 초기화 (버그 수정)
+    isGameOver=false;
 }
 
 </script>
