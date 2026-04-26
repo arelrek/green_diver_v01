@@ -18,23 +18,27 @@ let player, cursors;
 let obstacles, items, trashGroup;
 
 let playerVY=0;
-let baseSpeed=2;
+let baseSpeed=3; // 초반 속도감 상향
 let speedBoost=0;
 
 let hp=100, eco=0, score=0, stage=1;
 let isGameOver=false;
 let isShowingStageText=false;
+let isFever=false;
+let combo=0;
 
 let turtle=null, dolphin=null;
-let turtleHP=0; 
 
 let hpBar, ecoBar, shieldGraphics;
 let hpTextUI, ecoTextUI;
-let gameOverText, scoreText, stageText;
+let gameOverText, scoreText, stageText, comboText;
 
 let lastObsTime=0, lastTrashTime=0, lastItemTime=0;
 let bubbleEmitter;
 let dolphinTimer = null;
+let turtleTimer = null;
+let comboTimer = null;
+let feverTimer = null;
 
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
@@ -61,7 +65,7 @@ function preload(){
     this.load.image('coral2','assets/coral2.png');
     this.load.image('coral3','assets/coral3.png');
     this.load.image('weed','assets/weed.png');
-    this.load.image('jelyfish','assets/jelyfish.png'); // 해파리 원본
+    this.load.image('jelyfish','assets/jelyfish.png'); 
     this.load.image('turtle_item','assets/turtle.png');
     this.load.image('turtle_active','assets/turtle1.png');
     this.load.image('dolphin_item','assets/dolphin.png');
@@ -101,6 +105,7 @@ function create(){
     ecoTextUI=this.add.text(230,40,'ECO: 0',{fontSize:'14px', fill:'#fff', fontStyle:'bold'}).setOrigin(0).setDepth(20);
 
     scoreText=this.add.text(GW-20,20,'SCORE: 0',{ fontSize:'24px', fill:'#fff', fontStyle:'bold' }).setOrigin(1,0).setDepth(20);
+    comboText=this.add.text(GW-20,80,'',{ fontSize:'20px', fill:'#f90', fontStyle:'bold' }).setOrigin(1,0).setDepth(20);
     stageText=this.add.text(GW-20,50,'STAGE: 1',{ fontSize:'20px', fill:'#ff0' }).setOrigin(1,0).setDepth(20);
 
     gameOverText=this.add.text(GW/2,GH/2,'',{ fontSize:'32px', fill:'#fff', align:'center' }).setOrigin(0.5).setDepth(20);
@@ -115,35 +120,44 @@ function update(time,delta){
 
     const dt=delta/1000;
     
-    // 스테이지 진행 (500점 당 1업, 최대 100)
+    // 피버 모드 체크
+    if(eco >= 100 && !isFever) triggerFever.call(this);
+
     let nextTarget = stage * 500;
-    if (score >= nextTarget && stage < 100 && !isShowingStageText) {
+    if (score >= nextTarget && stage < 100 && !isShowingStageText && !isFever) {
         triggerStageClear.call(this);
     }
     
     score += dt * 10;
     scoreText.setText('SCORE: ' + Math.floor(score));
 
-    // 난이도 스케일링 (1~100 스테이지)
-    baseSpeed = 2 + (stage * 0.05); // 갈수록 빨라짐
-    const obsDelay = Math.max(300, 1500 - (stage * 12)); // 장애물 증가
-    const trashDelay = 2000 + (stage * 30); // 쓰레기 감소
+    baseSpeed = 3 + (stage * 0.05); 
+    const obsDelay = Math.max(300, 1500 - (stage * 12)); 
+    const trashDelay = 2000 + (stage * 20); 
     const itemDelay = 6000;
-    const speed = baseSpeed + speedBoost;
+    
+    // 피버 중첩 속도
+    const speed = isFever ? baseSpeed + 8 : baseSpeed + speedBoost;
+    const gravity = isFever ? 0 : 250 + (stage * 4); // 피버 시 중력 무시(정중앙 고정용)
 
-    // 중력 스케일링 (초반 가벼움, 후반 무거움)
-    const gravity = 250 + (stage * 4);
-
-    if(time - lastObsTime > obsDelay){ spawnObstacle.call(this, time); lastObsTime = time; }
-    if(time - lastTrashTime > trashDelay){ spawnTrash.call(this, time); lastTrashTime = time; }
-    if(time - lastItemTime > itemDelay){ spawnItem.call(this); lastItemTime = time; }
-
-    playerVY += gravity * dt;
-    player.y += playerVY * dt;
+    if(!isFever) {
+        if(time - lastObsTime > obsDelay){ spawnObstacle.call(this, time); lastObsTime = time; }
+        if(time - lastTrashTime > trashDelay){ spawnTrash.call(this, time); lastTrashTime = time; }
+        if(time - lastItemTime > itemDelay){ spawnItem.call(this); lastItemTime = time; }
+        
+        playerVY += gravity * dt;
+        player.y += playerVY * dt;
+    } else {
+        // 피버 모드 시 화면 중앙으로 이동 및 무한 쓰레기 스폰 효과
+        player.y += (GH/2 - player.y) * 0.1;
+        if(time - lastTrashTime > 200){ spawnTrash.call(this, time, true); lastTrashTime = time; }
+    }
 
     if(player.y < 0 || player.y > GH){ hp=0; gameOver(); }
 
-    player.setTexture(time%300<150?'diver_a':'diver_b');
+    player.setTexture((isFever || time%300<150)?'diver_a':'diver_b');
+    if(isFever) player.setTint(Math.random() > 0.5 ? 0xffaaaa : 0xaaffaa);
+    else player.clearTint();
 
     obstacles.getChildren().forEach(o=>{
         if(o.isJelly) {
@@ -160,12 +174,17 @@ function update(time,delta){
 
     trashGroup.getChildren().forEach(t=>{
         t.x -= speed;
+        // 자석 효과 (피버 중)
+        if(isFever) {
+            t.y += (player.y - t.y) * 0.1;
+            t.x += (player.x - t.x) * 0.05;
+        }
+        
         if(collideHitbox(player,t)){
             t.destroy();
-            eco=Math.min(100,eco+20);
-            score += 100;
-            showFloatText.call(this, t.x, t.y, '+100', 0x00ff88);
-            playTone(800, 'sine', 0.1);
+            addCombo.call(this);
+            if(!isFever) eco = Math.min(100, eco + 15);
+            playTone(800 + (combo*50), 'sine', 0.1);
         }
         if(t.x<-50) t.destroy();
     });
@@ -175,7 +194,7 @@ function update(time,delta){
         i.y += Math.sin(time*0.005)*1;
         if(collideHitbox(player,i)){
             applyItem.call(this,i.itemType);
-            showFloatText.call(this, i.x, i.y, i.itemType==='turtle_item'?'SHIELD':'BOOSTER', 0xffcc00);
+            showFloatText.call(this, i.x, i.y, i.itemType==='turtle_item'?'SHIELD 10s':'BOOSTER', 0xffcc00);
             playTone(1200, 'sine', 0.15);
             i.destroy();
         }
@@ -190,8 +209,8 @@ function update(time,delta){
         shieldGraphics.strokeCircle(player.x, player.y, pulse);
     }
     
-    if(dolphin){
-        dolphin.setPosition(player.x+50, player.y + Math.sin(time*0.01)*20);
+    if(dolphin || isFever){
+        if(dolphin) dolphin.setPosition(player.x+50, player.y + Math.sin(time*0.01)*20);
         bubbleEmitter.start();
         bubbleEmitter.setPosition(player.x - 30, player.y);
     } else {
@@ -199,16 +218,43 @@ function update(time,delta){
     }
 
     hpBar.width=hp*2;
-    ecoBar.width=eco*2;
+    ecoBar.width=isFever ? 200 : eco*2;
 
     hpTextUI.setText('HP: ' + Math.max(0, Math.floor(hp)));
     hpTextUI.x = 20 + hpBar.width + 10;
-    ecoTextUI.setText('ECO: ' + Math.floor(eco));
+    ecoTextUI.setText(isFever ? 'FEVER!' : 'ECO: ' + Math.floor(eco));
     ecoTextUI.x = 20 + ecoBar.width + 10;
 
-    this.bg1.tilePositionX += 0.2;
-    this.bg2.tilePositionX += 0.5;
-    this.bg3.tilePositionX += 1;
+    this.bg1.tilePositionX += isFever ? 1.0 : 0.2;
+    this.bg2.tilePositionX += isFever ? 2.5 : 0.5;
+    this.bg3.tilePositionX += isFever ? 5.0 : 1;
+}
+
+function triggerFever() {
+    isFever = true;
+    showFloatText.call(this, GW/2, GH/2, 'ECO FEVER!!', 0x00ff88);
+    playTone(1500, 'square', 0.5);
+    
+    if(feverTimer) feverTimer.remove();
+    feverTimer = this.time.delayedCall(5000, () => {
+        isFever = false;
+        eco = 0;
+    });
+}
+
+function addCombo() {
+    combo++;
+    let pts = 100 * combo;
+    score += pts;
+    showFloatText.call(this, player.x, player.y, `+${pts}`, 0x00ff88);
+    
+    comboText.setText(`${combo} COMBO!`);
+    
+    if(comboTimer) comboTimer.remove();
+    comboTimer = this.time.delayedCall(2000, () => { 
+        combo = 0; 
+        comboText.setText(''); 
+    });
 }
 
 function triggerStageClear() {
@@ -253,17 +299,24 @@ function damage(d){
 
 function hitObstacle(o){
     o.destroy();
+    
+    if(isFever) {
+        score += 50; // 피버 돌진 시 파괴 점수
+        showFloatText.call(this, player.x, player.y, 'BREAK!', 0xffaa00);
+        return;
+    }
+
     showFloatText.call(this, player.x, player.y, 'HIT!', 0xff0000);
 
     if(turtle){
-        turtleHP--;
-        if(turtleHP<=0){ turtle.destroy(); turtle=null; }
-        return; 
+        showFloatText.call(this, player.x, player.y-30, 'BLOCKED', 0x00ff00);
+        return; // 보호막은 타격 받아도 지속 시간 전까지 사라지지 않음
     }
     
-    // 데미지 스케일링: 기본 10 + 스테이지 비례
     const currentDamage = 10 + Math.floor(stage * 0.5);
     damage.call(this, currentDamage);
+    combo = 0;
+    comboText.setText('');
 
     if(dolphin){
         dolphin.destroy(); dolphin=null; speedBoost=0;
@@ -275,7 +328,11 @@ function applyItem(type){
     if(type==='turtle_item'){
         if(turtle) turtle.destroy();
         turtle=this.add.image(player.x+40,player.y,'turtle_active').setScale(0.5).setDepth(11);
-        turtleHP=3;
+        
+        if(turtleTimer) turtleTimer.remove();
+        turtleTimer = this.time.delayedCall(10000, () => {
+            if(turtle) { turtle.destroy(); turtle=null; }
+        });
     }
     if(type==='dolphin_item'){
         if(dolphin) dolphin.destroy();
@@ -316,9 +373,11 @@ function spawnObstacle(time){
     obstacles.add(o);
 }
 
-function spawnTrash(time){
+function spawnTrash(time, isFeverSpawn = false){
     const key = Phaser.Utils.Array.GetRandom(['trash1','trash2','trash3']);
-    const t=this.add.image(GW+50, Phaser.Math.Between(80, GH-80), key); 
+    // 피버 시 화면 전체 분포, 평시엔 중앙 위주
+    const yRange = isFeverSpawn ? Phaser.Math.Between(50, GH-50) : Phaser.Math.Between(80, GH-80);
+    const t=this.add.image(GW+50, yRange, key); 
     trashGroup.add(t);
 }
 
@@ -333,9 +392,10 @@ function jump(){
     if(isGameOver) return;
     if(audioCtx.state === 'suspended') audioCtx.resume();
     
-    // 점프 반동 스케일링 (중력 증가에 맞춰)
-    const jumpForce = 220 + (stage * 3);
-    playerVY = -jumpForce;
+    if(!isFever) {
+        const jumpForce = 220 + (stage * 3);
+        playerVY = -jumpForce;
+    }
 }
 
 function gameOver(){
@@ -346,11 +406,15 @@ function gameOver(){
 
 function restartGame(){
     this.scene.restart();
-    hp=100; eco=0; score=0; stage=1;
+    hp=100; eco=0; score=0; stage=1; combo=0;
     playerVY=0; 
     speedBoost=0; turtle=null; dolphin=null;
-    isGameOver=false; isShowingStageText=false;
+    isGameOver=false; isShowingStageText=false; isFever=false;
+    
     if(dolphinTimer) dolphinTimer.remove();
+    if(turtleTimer) turtleTimer.remove();
+    if(feverTimer) feverTimer.remove();
+    if(comboTimer) comboTimer.remove();
 }
 
 function showFloatText(x, y, msg, color){
