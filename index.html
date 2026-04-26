@@ -12,7 +12,6 @@ body { margin:0; padding:0; background:#000; overflow:hidden; }
 <body>
 
 <script>
-
 const GW=800, GH=450;
 
 let player, cursors;
@@ -22,16 +21,19 @@ let playerVY=0;
 let baseSpeed=2;
 let speedBoost=0;
 
-let hp=100, eco=0, score=0;
+let hp=100, eco=0, score=0, stage=1;
 let isGameOver=false;
 
 let turtle=null, dolphin=null;
 let turtleHP=0, dolphinHP=0;
 
-let hpBar, ecoBar;
-let gameOverText, scoreText;
+let hpBar, ecoBar, shieldGraphics;
+let gameOverText, scoreText, stageText;
 
-/* ================= CONFIG ================= */
+let lastObsTime=0, lastTrashTime=0, lastItemTime=0;
+let trashPatternTime=0;
+let bubbleEmitter;
+
 const config = {
     type: Phaser.AUTO,
     scale: {
@@ -45,7 +47,6 @@ const config = {
 
 new Phaser.Game(config);
 
-/* ================= PRELOAD ================= */
 function preload(){
     this.load.image('diver_a','assets/diver_a.png');
     this.load.image('diver_b','assets/diver_b.png');
@@ -63,58 +64,78 @@ function preload(){
     this.load.image('trash1','assets/trash1.png');
     this.load.image('trash2','assets/trash2.png');
     this.load.image('trash3','assets/trash3.png');
+
+    // 파티클용 임시 이미지 생성
+    let g = this.make.graphics({x:0, y:0, add:false});
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(4,4,4);
+    g.generateTexture('bubble', 8, 8);
+
+    // 오디오 더미 (실제 파일 경로 필요)
+    this.load.audio('get_item', 'assets/get.mp3');
+    this.load.audio('hit', 'assets/hit.mp3');
 }
 
-/* ================= CREATE ================= */
 function create(){
     this.bg1 = this.add.tileSprite(0,0,GW,GH,'bg1').setOrigin(0).setDepth(-3);
     this.bg2 = this.add.tileSprite(0,0,GW,GH,'bg2').setOrigin(0).setDepth(-2);
     this.bg3 = this.add.tileSprite(0,0,GW,GH,'bg3').setOrigin(0).setDepth(-1);
 
     player=this.add.image(150,GH/2,'diver_a').setDepth(10);
+    shieldGraphics = this.add.graphics().setDepth(9);
 
     obstacles=this.add.group();
     items=this.add.group();
     trashGroup=this.add.group();
 
-    hpBar=this.add.rectangle(20,20,200,15,0x00ffcc).setOrigin(0);
-    ecoBar=this.add.rectangle(20,40,0,10,0x00ff88).setOrigin(0);
+    bubbleEmitter = this.add.particles(0,0,'bubble', {
+        speed: { min: -50, max: -200 },
+        scale: { start: 1, end: 0 },
+        alpha: { start: 0.5, end: 0 },
+        lifespan: 600,
+        blendMode: 'ADD',
+        emitting: false
+    });
 
-    scoreText=this.add.text(GW-20,20,'SCORE: 0',{
-        fontSize:'24px', fill:'#fff', fontStyle:'bold'
-    }).setOrigin(1,0);
+    hpBar=this.add.rectangle(20,20,200,15,0x00ffcc).setOrigin(0).setDepth(20);
+    ecoBar=this.add.rectangle(20,40,0,10,0x00ff88).setOrigin(0).setDepth(20);
 
-    gameOverText=this.add.text(GW/2,GH/2,'',{
-        fontSize:'32px', fill:'#fff', align:'center'
-    }).setOrigin(0.5);
+    scoreText=this.add.text(GW-20,20,'SCORE: 0',{ fontSize:'24px', fill:'#fff', fontStyle:'bold' }).setOrigin(1,0).setDepth(20);
+    stageText=this.add.text(GW-20,50,'STAGE: 1',{ fontSize:'20px', fill:'#ff0' }).setOrigin(1,0).setDepth(20);
+
+    gameOverText=this.add.text(GW/2,GH/2,'',{ fontSize:'32px', fill:'#fff', align:'center' }).setOrigin(0.5).setDepth(20);
 
     cursors=this.input.keyboard.createCursorKeys();
 
-    this.input.on('pointerdown',()=>{
-        if(isGameOver) restartGame.call(this);
-        else jump();
-    });
-    this.input.keyboard.on('keydown-SPACE',()=>{
-        if(isGameOver) restartGame.call(this);
-        else jump();
-    });
+    this.input.on('pointerdown',()=>{ if(isGameOver) restartGame.call(this); else jump(); });
+    this.input.keyboard.on('keydown-SPACE',()=>{ if(isGameOver) restartGame.call(this); else jump(); });
     this.input.keyboard.on('keydown-R',()=>restartGame.call(this));
-
-    this.time.addEvent({delay:1200, callback:spawnObstacle, callbackScope:this, loop:true});
-    this.time.addEvent({delay:2000, callback:spawnTrash, callbackScope:this, loop:true});
-    this.time.addEvent({delay:5000, callback:spawnItem, callbackScope:this, loop:true});
 }
 
-/* ================= UPDATE ================= */
 function update(time,delta){
     if(isGameOver) return;
 
     const dt=delta/1000;
+    
+    // 스테이지 계산 (최대 5, 500점당 1업)
+    stage = Math.min(5, Math.floor(score/500) + 1);
+    stageText.setText('STAGE: ' + stage);
+    
+    // 스테이지별 난이도 적용
+    baseSpeed = 2 + (stage - 1) * 0.5;
+    const obsDelay = Math.max(600, 1500 - (stage * 200));
+    const trashDelay = 1000;
+    const itemDelay = 5000;
+
     const speed = baseSpeed + speedBoost;
 
-    // 점수 증가 (생존 시)
     score += dt * 10;
     scoreText.setText('SCORE: ' + Math.floor(score));
+
+    // 스폰 타이머 로직
+    if(time - lastObsTime > obsDelay){ spawnObstacle.call(this, time); lastObsTime = time; }
+    if(time - lastTrashTime > trashDelay){ spawnTrash.call(this, time); lastTrashTime = time; }
+    if(time - lastItemTime > itemDelay){ spawnItem.call(this); lastItemTime = time; }
 
     this.bg1.tilePositionX += 0.2;
     this.bg2.tilePositionX += 0.5;
@@ -123,64 +144,93 @@ function update(time,delta){
     playerVY+=500*dt;
     player.y+=playerVY*dt;
 
-    if(player.y < 0 || player.y > GH){
-        hp = 0;
-        gameOver();
-    }
+    if(player.y < 0 || player.y > GH){ hp=0; gameOver(); }
 
     player.setTexture(time%300<150?'diver_a':'diver_b');
 
+    // 충돌 판정 및 이동
     obstacles.getChildren().forEach(o=>{
-        o.x -= speed * o.speed;
-        if(collide(player,o)) hitObstacle(o); // 장애물 객체 전달
+        o.x -= speed * o.speedX;
+        // 움직이는 수초 로직
+        if(o.isDynamic) o.y = o.startY + Math.sin(time*0.003)*30; 
+
+        if(collideHitbox(player,o)) hitObstacle.call(this, o);
         if(o.x<-50) o.destroy();
     });
 
     trashGroup.getChildren().forEach(t=>{
         t.x -= speed;
-        if(collide(player,t)){
+        if(collideHitbox(player,t)){
             t.destroy();
             eco=Math.min(100,eco+20);
-            score += 100; // 쓰레기 획득 시 점수 증가
+            score += 100;
+            showFloatText.call(this, t.x, t.y, '+100', 0x00ff88);
+            playSound.call(this, 'get_item');
         }
+        if(t.x<-50) t.destroy();
     });
 
     items.getChildren().forEach(i=>{
         i.x -= speed;
         i.y += Math.sin(time*0.005)*1;
-        if(collide(player,i)){
+        if(collideHitbox(player,i)){
             applyItem.call(this,i.itemType);
+            showFloatText.call(this, i.x, i.y, i.itemType==='turtle_item'?'SHIELD':'BOOSTER', 0xffcc00);
+            playSound.call(this, 'get_item');
             i.destroy();
         }
+        if(i.x<-50) i.destroy();
     });
 
-    if(turtle) turtle.setPosition(player.x+40, player.y);
-    if(dolphin) dolphin.setPosition(player.x+50, player.y + Math.sin(time*0.01)*20);
+    // 쉴드 이펙트 렌더링
+    shieldGraphics.clear();
+    if(turtle){
+        turtle.setPosition(player.x+40, player.y);
+        shieldGraphics.lineStyle(4, 0x00ff00, 0.6);
+        shieldGraphics.strokeCircle(player.x, player.y, 45);
+    }
+    
+    // 부스터 파티클 연출
+    if(dolphin){
+        dolphin.setPosition(player.x+50, player.y + Math.sin(time*0.01)*20);
+        bubbleEmitter.start();
+        bubbleEmitter.setPosition(player.x-20, player.y);
+    } else {
+        bubbleEmitter.stop();
+    }
 
     hpBar.width=hp*2;
     ecoBar.width=eco*2;
 }
 
 /* ================= LOGIC ================= */
-function collide(a,b){
-    return Phaser.Math.Distance.Between(a.x,a.y,b.x,b.y)<40;
+// AABB Hitbox 기반 충돌 (가장자리 25% 축소)
+function collideHitbox(a, b){
+    const b1 = a.getBounds();
+    const b2 = b.getBounds();
+    const shrink1X = b1.width * 0.25, shrink1Y = b1.height * 0.25;
+    const shrink2X = b2.width * 0.25, shrink2Y = b2.height * 0.25;
+
+    const r1 = new Phaser.Geom.Rectangle(b1.x + shrink1X, b1.y + shrink1Y, b1.width - shrink1X*2, b1.height - shrink1Y*2);
+    const r2 = new Phaser.Geom.Rectangle(b2.x + shrink2X, b2.y + shrink2Y, b2.width - shrink2X*2, b2.height - shrink2Y*2);
+    
+    return Phaser.Geom.Intersects.RectangleToRectangle(r1, r2);
 }
 
 function damage(d){
-    // eco바 먼저 감소 로직
-    if(eco >= d){
-        eco -= d;
-    } else {
-        let remainingDamage = d - eco;
+    playSound.call(this, 'hit');
+    if(eco >= d){ eco -= d; } 
+    else {
+        let remaining = d - eco;
         eco = 0;
-        hp -= remainingDamage;
+        hp -= remaining;
     }
-    
     if(hp<=0) gameOver();
 }
 
 function hitObstacle(o){
-    o.destroy(); // 중복 타격 방지를 위해 충돌 시 장애물 즉시 파괴
+    o.destroy();
+    showFloatText.call(this, player.x, player.y, 'HIT!', 0xff0000);
 
     if(turtle){
         turtleHP--;
@@ -189,45 +239,48 @@ function hitObstacle(o){
     }
     if(dolphin){
         dolphinHP--;
-        if(dolphinHP<=0){
-            dolphin.destroy();
-            dolphin=null;
-            speedBoost=0;
-        }
+        if(dolphinHP<=0){ dolphin.destroy(); dolphin=null; speedBoost=0; }
         return;
     }
-    damage(10); // 체력 바의 10% 감소 (100 기준 10)
+    damage.call(this, 10);
 }
 
 function applyItem(type){
     if(type==='turtle_item'){
         if(turtle) turtle.destroy();
-        turtle=this.add.image(player.x+40,player.y,'turtle_active').setScale(0.5);
+        turtle=this.add.image(player.x+40,player.y,'turtle_active').setScale(0.5).setDepth(11);
         turtleHP=3;
     }
     if(type==='dolphin_item'){
         if(dolphin) dolphin.destroy();
-        dolphin=this.add.image(player.x+50,player.y,'dolphin_active').setScale(0.6);
+        dolphin=this.add.image(player.x+50,player.y,'dolphin_active').setScale(0.6).setDepth(11);
         dolphinHP=3;
-        speedBoost=2;
+        speedBoost=3; // 부스터 속도 강화
     }
 }
 
-function spawnObstacle(){
+function spawnObstacle(time){
     const types=['coral1','coral2','coral3','weed'];
     const key=Phaser.Utils.Array.GetRandom(types);
 
+    const isDynamic = (key === 'weed' && Math.random() > 0.5);
     const y = key === 'weed' ? 50 : GH - 50;
 
     const o=this.add.image(GW+50,y,key);
-    o.speed=Phaser.Math.Between(1,3);
+    o.speedX = Phaser.Math.Between(10, 15) * 0.1; 
+    o.isDynamic = isDynamic;
+    o.startY = y;
 
     obstacles.add(o);
 }
 
-function spawnTrash(){
-    const key=Phaser.Utils.Array.GetRandom(['trash1','trash2','trash3']);
-    const t=this.add.image(GW+50,Phaser.Math.Between(80,350),key);
+function spawnTrash(time){
+    // 사인파 형태로 여러 개 연달아 배치 유도
+    const key = Phaser.Utils.Array.GetRandom(['trash1','trash2','trash3']);
+    trashPatternTime += 0.5;
+    const yOffset = Math.sin(trashPatternTime) * 100;
+    
+    const t=this.add.image(GW+50, GH/2 + yOffset, key);
     trashGroup.add(t);
 }
 
@@ -246,19 +299,34 @@ function jump(){
 function gameOver(){
     isGameOver=true;
     gameOverText.setText('GAME OVER\nTap or Press R to Restart');
+    bubbleEmitter.stop();
 }
 
 function restartGame(){
     this.scene.restart();
-    hp=100;
-    eco=0;
-    score=0;
-    speedBoost=0;
-    turtle=null;
-    dolphin=null;
+    hp=100; eco=0; score=0; stage=1;
+    speedBoost=0; turtle=null; dolphin=null;
     isGameOver=false;
 }
 
+// 텍스트 플로팅 연출
+function showFloatText(x, y, msg, color){
+    let txt = this.add.text(x, y-20, msg, { fontSize:'20px', fill:'#fff', fontStyle:'bold' }).setTint(color).setOrigin(0.5);
+    this.tweens.add({
+        targets: txt,
+        y: y-60,
+        alpha: 0,
+        duration: 800,
+        onComplete: () => txt.destroy()
+    });
+}
+
+function playSound(key){
+    // 실제 사운드 파일이 로드되지 않아 생기는 콘솔 에러 방지용 체크
+    if(this.cache.audio.exists(key)) {
+        this.sound.play(key);
+    }
+}
 </script>
 </body>
 </html>
