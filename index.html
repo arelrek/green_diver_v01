@@ -1,10 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Green Diver FINAL</title>
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+<style>
+body { margin:0; background:#000; }
+</style>
+</head>
+<body>
+
 <script>
 
 const GW=800, GH=450;
 
-let player, obstacles, items, trashGroup;
-let playerVY=0, baseSpeed=2, speedBoost=0;
+let player, cursors;
+let obstacles, items, trashGroup;
+
+let playerVY=0;
+let baseSpeed=2;
+let speedBoost=0;
 
 let hp=100, eco=0;
 let isGameOver=false;
@@ -13,13 +28,13 @@ let turtle=null, dolphin=null;
 let turtleHP=0, dolphinHP=0;
 
 let hpBar, ecoBar;
+let gameOverText;
 
 /* ================= CONFIG ================= */
 const config = {
     type: Phaser.AUTO,
     width: GW,
     height: GH,
-    physics: { default:'arcade' },
     scene: { preload, create, update }
 };
 
@@ -27,20 +42,30 @@ new Phaser.Game(config);
 
 /* ================= PRELOAD ================= */
 function preload(){
+
+    // 캐릭터
     this.load.image('diver_a','assets/diver_a.png');
     this.load.image('diver_b','assets/diver_b.png');
 
+    // 배경 3장
+    this.load.image('bg1','assets/bg1.png');
+    this.load.image('bg2','assets/bg2.png');
+    this.load.image('bg3','assets/bg3.png');
+
+    // 장애물
     this.load.image('coral1','assets/coral1.png');
     this.load.image('coral2','assets/coral2.png');
     this.load.image('coral3','assets/coral3.png');
     this.load.image('weed','assets/weed.png');
 
+    // 아이템
     this.load.image('turtle_item','assets/turtle.png');
     this.load.image('turtle_active','assets/turtle1.png');
 
     this.load.image('dolphin_item','assets/dolphin.png');
     this.load.image('dolphin_active','assets/dolphin1.png');
 
+    // 쓰레기
     this.load.image('trash1','assets/trash1.png');
     this.load.image('trash2','assets/trash2.png');
     this.load.image('trash3','assets/trash3.png');
@@ -49,7 +74,12 @@ function preload(){
 /* ================= CREATE ================= */
 function create(){
 
-    player=this.add.image(150,GH/2,'diver_a');
+    /* 🎯 배경 (확실히 보이게) */
+    this.bg1 = this.add.tileSprite(0,0,GW,GH,'bg1').setOrigin(0).setDepth(-3);
+    this.bg2 = this.add.tileSprite(0,0,GW,GH,'bg2').setOrigin(0).setDepth(-2);
+    this.bg3 = this.add.tileSprite(0,0,GW,GH,'bg3').setOrigin(0).setDepth(-1);
+
+    player=this.add.image(150,GH/2,'diver_a').setDepth(10);
 
     obstacles=this.add.group();
     items=this.add.group();
@@ -58,8 +88,17 @@ function create(){
     hpBar=this.add.rectangle(20,20,200,15,0x00ffcc).setOrigin(0);
     ecoBar=this.add.rectangle(20,40,0,10,0x00ff88).setOrigin(0);
 
+    gameOverText=this.add.text(GW/2,GH/2,'',{
+        fontSize:'32px', fill:'#fff'
+    }).setOrigin(0.5);
+
+    cursors=this.input.keyboard.createCursorKeys();
+
     this.input.on('pointerdown',()=>jump());
     this.input.keyboard.on('keydown-SPACE',()=>jump());
+
+    /* ✅ 재시작 FIX */
+    this.input.keyboard.on('keydown-R',()=>restartGame.call(this));
 
     this.time.addEvent({delay:1200, callback:spawnObstacle, callbackScope:this, loop:true});
     this.time.addEvent({delay:2000, callback:spawnTrash, callbackScope:this, loop:true});
@@ -72,45 +111,45 @@ function update(time,delta){
     if(isGameOver) return;
 
     const dt=delta/1000;
-    const currentSpeed = baseSpeed + speedBoost;
+    const speed = baseSpeed + speedBoost;
 
-    // 중력
+    /* 배경 스크롤 */
+    this.bg1.tilePositionX += 0.2;
+    this.bg2.tilePositionX += 0.5;
+    this.bg3.tilePositionX += 1;
+
+    /* 중력 */
     playerVY+=500*dt;
     player.y+=playerVY*dt;
 
-    // 경계
     if(player.y<20 || player.y>GH-20){
         damage(1);
     }
 
-    // 애니
     player.setTexture(time%300<150?'diver_a':'diver_b');
 
-    // 장애물
+    /* 장애물 */
     obstacles.getChildren().forEach(o=>{
-        o.x -= currentSpeed * o.speed;
+        o.x -= speed * o.speed;
 
         if(collide(player,o)) hitObstacle();
 
         if(o.x<-50) o.destroy();
     });
 
-    // 쓰레기
+    /* 쓰레기 */
     trashGroup.getChildren().forEach(t=>{
-        t.x -= currentSpeed;
+        t.x -= speed;
 
         if(collide(player,t)){
             t.destroy();
             eco=Math.min(100,eco+20);
         }
-
-        if(t.x<-50) t.destroy();
     });
 
-    // 아이템
+    /* 아이템 */
     items.getChildren().forEach(i=>{
-        i.x -= currentSpeed;
-
+        i.x -= speed;
         i.y += Math.sin(time*0.005)*1;
 
         if(collide(player,i)){
@@ -119,50 +158,37 @@ function update(time,delta){
         }
     });
 
-    // 🟢 거북이 (완전 고정)
+    /* 거북이 */
     if(turtle){
-        turtle.x = player.x + 40;
-        turtle.y = player.y;
+        turtle.setPosition(player.x+40, player.y);
     }
 
-    // 🔵 돌고래 (웨이브)
+    /* 돌고래 */
     if(dolphin){
-        dolphin.x = player.x + 50;
-        dolphin.y = player.y + Math.sin(time*0.01)*20;
+        dolphin.setPosition(player.x+50, player.y + Math.sin(time*0.01)*20);
     }
 
-    hpBar.width = hp*2;
-    ecoBar.width = eco*2;
+    hpBar.width=hp*2;
+    ecoBar.width=eco*2;
 }
 
-/* ================= 충돌 ================= */
+/* ================= LOGIC ================= */
+
 function collide(a,b){
     return Phaser.Math.Distance.Between(a.x,a.y,b.x,b.y)<40;
 }
 
-/* ================= 데미지 ================= */
 function damage(d){
-    if(eco>0){
-        eco-=d;
-        return;
-    }
-
+    if(eco>0){ eco-=d; return; }
     hp-=d;
-    if(hp<=0){
-        isGameOver=true;
-        alert("GAME OVER");
-    }
+    if(hp<=0) gameOver();
 }
 
-/* ================= 장애물 ================= */
 function hitObstacle(){
 
     if(turtle){
         turtleHP--;
-        if(turtleHP<=0){
-            turtle.destroy();
-            turtle=null;
-        }
+        if(turtleHP<=0){ turtle.destroy(); turtle=null; }
         return;
     }
 
@@ -179,64 +205,69 @@ function hitObstacle(){
     damage(10);
 }
 
-/* ================= 아이템 ================= */
 function applyItem(type){
 
     if(type==='turtle_item'){
         if(turtle) turtle.destroy();
-
         turtle=this.add.image(player.x+40,player.y,'turtle_active').setScale(0.5);
         turtleHP=3;
     }
 
     if(type==='dolphin_item'){
         if(dolphin) dolphin.destroy();
-
         dolphin=this.add.image(player.x+50,player.y,'dolphin_active').setScale(0.6);
         dolphinHP=3;
         speedBoost=2;
     }
 }
 
-/* ================= 스폰 ================= */
 function spawnObstacle(){
     const types=['coral1','coral2','coral3','weed'];
-    const key=types[Math.floor(Math.random()*types.length)];
+    const key=Phaser.Utils.Array.GetRandom(types);
 
     const y = key==='weed'
         ? Phaser.Math.Between(50,150)
         : Phaser.Math.Between(GH-120,GH-40);
 
     const o=this.add.image(GW+50,y,key);
-
     o.speed=Phaser.Math.Between(1,3);
 
     obstacles.add(o);
 }
 
 function spawnTrash(){
-    const types=['trash1','trash2','trash3'];
-    const key=types[Math.floor(Math.random()*types.length)];
-
+    const key=Phaser.Utils.Array.GetRandom(['trash1','trash2','trash3']);
     const t=this.add.image(GW+50,Phaser.Math.Between(80,350),key);
     trashGroup.add(t);
 }
 
 function spawnItem(){
-
-    const key = Math.random()>0.5 ? 'turtle_item' : 'dolphin_item';
-
+    const key=Math.random()>0.5?'turtle_item':'dolphin_item';
     const i=this.add.image(GW+50,Phaser.Math.Between(100,300),key);
-
     i.itemType=key;
-
     items.add(i);
 }
 
-/* ================= 점프 ================= */
 function jump(){
     if(isGameOver) return;
     playerVY=-300;
 }
 
+function gameOver(){
+    isGameOver=true;
+    gameOverText.setText('GAME OVER\nR to Restart');
+}
+
+/* ✅ 완전 정상 재시작 */
+function restartGame(){
+    this.scene.restart();
+    hp=100;
+    eco=0;
+    speedBoost=0;
+    turtle=null;
+    dolphin=null;
+}
+
 </script>
+</body>
+</html>
