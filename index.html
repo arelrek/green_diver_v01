@@ -26,7 +26,7 @@ let isGameOver=false;
 let isShowingStageText=false;
 
 let turtle=null, dolphin=null;
-let turtleHP=0; // 돌고래는 체력 판정 없음
+let turtleHP=0; 
 
 let hpBar, ecoBar, shieldGraphics;
 let hpTextUI, ecoTextUI;
@@ -61,7 +61,7 @@ function preload(){
     this.load.image('coral2','assets/coral2.png');
     this.load.image('coral3','assets/coral3.png');
     this.load.image('weed','assets/weed.png');
-    this.load.image('jelyfish','assets/jelyfish.png');
+    this.load.image('jelyfish','assets/jelyfish.png'); // 해파리 원본
     this.load.image('turtle_item','assets/turtle.png');
     this.load.image('turtle_active','assets/turtle1.png');
     this.load.image('dolphin_item','assets/dolphin.png');
@@ -73,14 +73,6 @@ function preload(){
     let g = this.make.graphics({x:0, y:0, add:false});
     g.fillStyle(0xffffff, 1); g.fillCircle(4,4,4);
     g.generateTexture('bubble', 8, 8);
-
-    // 해파리 이미지 없을 경우 대비 코드로 임시 그래픽 생성
- //   let jg = this.make.graphics({x:0, y:0, add:false});
-  //  jg.fillStyle(0xdd88ff, 0.8);
-  //  jg.fillCircle(15, 15, 15);
- //   jg.fillStyle(0xaa55dd, 0.8);
- //   jg.fillRect(5, 15, 20, 10);
-//    jg.generateTexture('jelyfish_gen', 30, 30);
 }
 
 function create(){
@@ -123,37 +115,39 @@ function update(time,delta){
 
     const dt=delta/1000;
     
-    // 스테이지 진행 관리
+    // 스테이지 진행 (500점 당 1업, 최대 100)
     let nextTarget = stage * 500;
-    if (score >= nextTarget && stage < 10 && !isShowingStageText) {
+    if (score >= nextTarget && stage < 100 && !isShowingStageText) {
         triggerStageClear.call(this);
     }
     
     score += dt * 10;
     scoreText.setText('SCORE: ' + Math.floor(score));
 
-    baseSpeed = 2 + (stage - 1) * 0.5;
-    const obsDelay = Math.max(500, 1500 - (stage * 150));
-    const trashDelay = 2500; 
+    // 난이도 스케일링 (1~100 스테이지)
+    baseSpeed = 2 + (stage * 0.05); // 갈수록 빨라짐
+    const obsDelay = Math.max(300, 1500 - (stage * 12)); // 장애물 증가
+    const trashDelay = 2000 + (stage * 30); // 쓰레기 감소
     const itemDelay = 6000;
     const speed = baseSpeed + speedBoost;
+
+    // 중력 스케일링 (초반 가벼움, 후반 무거움)
+    const gravity = 250 + (stage * 4);
 
     if(time - lastObsTime > obsDelay){ spawnObstacle.call(this, time); lastObsTime = time; }
     if(time - lastTrashTime > trashDelay){ spawnTrash.call(this, time); lastTrashTime = time; }
     if(time - lastItemTime > itemDelay){ spawnItem.call(this); lastItemTime = time; }
 
-    playerVY+=500*dt;
-    player.y+=playerVY*dt;
+    playerVY += gravity * dt;
+    player.y += playerVY * dt;
 
     if(player.y < 0 || player.y > GH){ hp=0; gameOver(); }
 
     player.setTexture(time%300<150?'diver_a':'diver_b');
 
-    // 오브젝트 업데이트
     obstacles.getChildren().forEach(o=>{
         if(o.isJelly) {
-            o.x -= speed * 0.4; // 해파리 속도 낮춤
-            // 큰 곡선(0.001) + 미세한 위아래 떨림(0.005)
+            o.x -= speed * 0.4;
             o.y = o.startY + Math.sin(time * 0.001 + o.offset) * 80 + Math.sin(time * 0.005 + o.offset) * 10;
         } else {
             o.x -= speed * o.speedX;
@@ -188,7 +182,6 @@ function update(time,delta){
         if(i.x<-50) i.destroy();
     });
 
-    // 쉴드 이펙트
     shieldGraphics.clear();
     if(turtle){
         turtle.setPosition(player.x+40, player.y);
@@ -197,7 +190,6 @@ function update(time,delta){
         shieldGraphics.strokeCircle(player.x, player.y, pulse);
     }
     
-    // 부스터 이펙트
     if(dolphin){
         dolphin.setPosition(player.x+50, player.y + Math.sin(time*0.01)*20);
         bubbleEmitter.start();
@@ -209,7 +201,6 @@ function update(time,delta){
     hpBar.width=hp*2;
     ecoBar.width=eco*2;
 
-    // UI 텍스트 업데이트
     hpTextUI.setText('HP: ' + Math.max(0, Math.floor(hp)));
     hpTextUI.x = 20 + hpBar.width + 10;
     ecoTextUI.setText('ECO: ' + Math.floor(eco));
@@ -220,10 +211,8 @@ function update(time,delta){
     this.bg3.tilePositionX += 1;
 }
 
-/* ================= LOGIC ================= */
 function triggerStageClear() {
     isShowingStageText = true;
-    
     let clearTxt = this.add.text(GW/2, GH/2, 'STAGE CLEAR', { fontSize:'40px', fill:'#0f0', fontStyle:'bold' }).setOrigin(0.5).setDepth(30);
     
     this.time.delayedCall(1500, () => {
@@ -266,16 +255,16 @@ function hitObstacle(o){
     o.destroy();
     showFloatText.call(this, player.x, player.y, 'HIT!', 0xff0000);
 
-    // 거북이 보호막 처리
     if(turtle){
         turtleHP--;
         if(turtleHP<=0){ turtle.destroy(); turtle=null; }
-        return; // 보호막이 데미지 흡수
+        return; 
     }
     
-    damage.call(this, 10); // 본체 피격
+    // 데미지 스케일링: 기본 10 + 스테이지 비례
+    const currentDamage = 10 + Math.floor(stage * 0.5);
+    damage.call(this, currentDamage);
 
-    // 돌고래는 피격 시 해제
     if(dolphin){
         dolphin.destroy(); dolphin=null; speedBoost=0;
         if(dolphinTimer) dolphinTimer.remove();
@@ -293,7 +282,6 @@ function applyItem(type){
         dolphin=this.add.image(player.x+50,player.y,'dolphin_active').setScale(0.6).setDepth(11);
         speedBoost=3;
         
-        // 돌고래 타이머 (8초 유지)
         if(dolphinTimer) dolphinTimer.remove();
         dolphinTimer = this.time.delayedCall(8000, () => {
             if(dolphin) { dolphin.destroy(); dolphin=null; speedBoost=0; }
@@ -302,19 +290,17 @@ function applyItem(type){
 }
 
 function spawnObstacle(time){
-    // jelyfish_gen 임시 텍스처 사용
-    const types=['coral1','coral2','coral3','weed','jelyfish_gen'];
+    const types=['coral1','coral2','coral3','weed','jelyfish'];
     const key=Phaser.Utils.Array.GetRandom(types);
 
-    if(key === 'jelyfish_gen') {
+    if(key === 'jelyfish') {
         let count = Math.random() > 0.5 ? Phaser.Math.Between(1, 3) : 1;
         let baseY = Phaser.Math.Between(150, GH - 150);
         for(let j=0; j<count; j++){
-            // 로컬에 jelyfish 파일이 있다면 'jelyfish' 키를 사용해도 됨
             let o=this.add.image(GW+50 + j*60, baseY, key);
             o.isJelly = true;
             o.startY = o.y;
-            o.offset = j * 0.5; // 떨림 오프셋
+            o.offset = j * 0.5;
             obstacles.add(o);
         }
         return;
@@ -346,7 +332,10 @@ function spawnItem(){
 function jump(){
     if(isGameOver) return;
     if(audioCtx.state === 'suspended') audioCtx.resume();
-    playerVY=-300;
+    
+    // 점프 반동 스케일링 (중력 증가에 맞춰)
+    const jumpForce = 220 + (stage * 3);
+    playerVY = -jumpForce;
 }
 
 function gameOver(){
