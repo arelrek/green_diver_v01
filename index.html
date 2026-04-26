@@ -23,6 +23,7 @@ let speedBoost=0;
 
 let hp=100, eco=0, score=0, stage=1;
 let isGameOver=false;
+let isTransitioning=false; // 스테이지 전환용 플래그
 
 let turtle=null, dolphin=null;
 let turtleHP=0, dolphinHP=0;
@@ -31,8 +32,10 @@ let hpBar, ecoBar, shieldGraphics;
 let gameOverText, scoreText, stageText;
 
 let lastObsTime=0, lastTrashTime=0, lastItemTime=0;
-let trashPatternTime=0;
 let bubbleEmitter;
+
+// Web Audio API 설정
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
 const config = {
     type: Phaser.AUTO,
@@ -57,6 +60,7 @@ function preload(){
     this.load.image('coral2','assets/coral2.png');
     this.load.image('coral3','assets/coral3.png');
     this.load.image('weed','assets/weed.png');
+    this.load.image('jelyfish','assets/jelyfish.png'); // 추가
     this.load.image('turtle_item','assets/turtle.png');
     this.load.image('turtle_active','assets/turtle1.png');
     this.load.image('dolphin_item','assets/dolphin.png');
@@ -65,15 +69,10 @@ function preload(){
     this.load.image('trash2','assets/trash2.png');
     this.load.image('trash3','assets/trash3.png');
 
-    // 파티클용 임시 이미지 생성
     let g = this.make.graphics({x:0, y:0, add:false});
     g.fillStyle(0xffffff, 1);
     g.fillCircle(4,4,4);
     g.generateTexture('bubble', 8, 8);
-
-    // 오디오 더미 (실제 파일 경로 필요)
-    this.load.audio('get_item', 'assets/get.mp3');
-    this.load.audio('hit', 'assets/hit.mp3');
 }
 
 function create(){
@@ -88,11 +87,15 @@ function create(){
     items=this.add.group();
     trashGroup=this.add.group();
 
+    // 부스터 파티클 방향 수정 (왼쪽 직선, 상하 캐릭터 크기만큼 퍼짐)
     bubbleEmitter = this.add.particles(0,0,'bubble', {
-        speed: { min: -50, max: -200 },
+        x: 0,
+        y: { min: -20, max: 20 },
+        speedX: { min: -200, max: -400 },
+        speedY: 0,
         scale: { start: 1, end: 0 },
-        alpha: { start: 0.5, end: 0 },
-        lifespan: 600,
+        alpha: { start: 0.6, end: 0 },
+        lifespan: 500,
         blendMode: 'ADD',
         emitting: false
     });
@@ -105,8 +108,6 @@ function create(){
 
     gameOverText=this.add.text(GW/2,GH/2,'',{ fontSize:'32px', fill:'#fff', align:'center' }).setOrigin(0.5).setDepth(20);
 
-    cursors=this.input.keyboard.createCursorKeys();
-
     this.input.on('pointerdown',()=>{ if(isGameOver) restartGame.call(this); else jump(); });
     this.input.keyboard.on('keydown-SPACE',()=>{ if(isGameOver) restartGame.call(this); else jump(); });
     this.input.keyboard.on('keydown-R',()=>restartGame.call(this));
@@ -117,108 +118,129 @@ function update(time,delta){
 
     const dt=delta/1000;
     
-    // 스테이지 계산 (최대 5, 500점당 1업)
-    stage = Math.min(5, Math.floor(score/500) + 1);
-    stageText.setText('STAGE: ' + stage);
-    
-    // 스테이지별 난이도 적용
-    baseSpeed = 2 + (stage - 1) * 0.5;
-    const obsDelay = Math.max(600, 1500 - (stage * 200));
-    const trashDelay = 1000;
-    const itemDelay = 5000;
+    // 스테이지 진행 관리
+    if (!isTransitioning) {
+        let nextTarget = stage * 500;
+        if (score >= nextTarget && stage < 10) {
+            triggerStageClear.call(this);
+            return;
+        }
+        
+        score += dt * 10;
+        scoreText.setText('SCORE: ' + Math.floor(score));
 
-    const speed = baseSpeed + speedBoost;
+        baseSpeed = 2 + (stage - 1) * 0.5;
+        const obsDelay = Math.max(500, 1500 - (stage * 150));
+        const trashDelay = 2500; // 빈도 감소
+        const itemDelay = 6000;
+        const speed = baseSpeed + speedBoost;
 
-    score += dt * 10;
-    scoreText.setText('SCORE: ' + Math.floor(score));
+        if(time - lastObsTime > obsDelay){ spawnObstacle.call(this, time); lastObsTime = time; }
+        if(time - lastTrashTime > trashDelay){ spawnTrash.call(this, time); lastTrashTime = time; }
+        if(time - lastItemTime > itemDelay){ spawnItem.call(this); lastItemTime = time; }
 
-    // 스폰 타이머 로직
-    if(time - lastObsTime > obsDelay){ spawnObstacle.call(this, time); lastObsTime = time; }
-    if(time - lastTrashTime > trashDelay){ spawnTrash.call(this, time); lastTrashTime = time; }
-    if(time - lastItemTime > itemDelay){ spawnItem.call(this); lastItemTime = time; }
+        playerVY+=500*dt;
+        player.y+=playerVY*dt;
 
+        if(player.y < 0 || player.y > GH){ hp=0; gameOver(); }
+
+        player.setTexture(time%300<150?'diver_a':'diver_b');
+
+        // 오브젝트 업데이트
+        obstacles.getChildren().forEach(o=>{
+            o.x -= speed * o.speedX;
+            if(o.isDynamic) o.y = o.startY + Math.sin(time*0.003)*30; 
+            if(o.isJelly) o.y = o.startY + Math.sin(time*0.002 + o.x)*50; // 해파리 이동
+
+            if(collideHitbox(player,o)) hitObstacle.call(this, o);
+            if(o.x<-50) o.destroy();
+        });
+
+        trashGroup.getChildren().forEach(t=>{
+            t.x -= speed;
+            if(collideHitbox(player,t)){
+                t.destroy();
+                eco=Math.min(100,eco+20);
+                score += 100;
+                showFloatText.call(this, t.x, t.y, '+100', 0x00ff88);
+                playTone(800, 'sine', 0.1);
+            }
+            if(t.x<-50) t.destroy();
+        });
+
+        items.getChildren().forEach(i=>{
+            i.x -= speed;
+            i.y += Math.sin(time*0.005)*1;
+            if(collideHitbox(player,i)){
+                applyItem.call(this,i.itemType);
+                showFloatText.call(this, i.x, i.y, i.itemType==='turtle_item'?'SHIELD':'BOOSTER', 0xffcc00);
+                playTone(1200, 'sine', 0.15);
+                i.destroy();
+            }
+            if(i.x<-50) i.destroy();
+        });
+
+        // 애니메이션 적용
+        shieldGraphics.clear();
+        if(turtle){
+            turtle.setPosition(player.x+40, player.y);
+            shieldGraphics.lineStyle(4, 0x00ff00, 0.6);
+            let pulse = 45 + Math.sin(time * 0.01) * 5; // 보호막 크기 애니
+            shieldGraphics.strokeCircle(player.x, player.y, pulse);
+        }
+        
+        if(dolphin){
+            dolphin.setPosition(player.x+50, player.y + Math.sin(time*0.01)*20);
+            bubbleEmitter.start();
+            bubbleEmitter.setPosition(player.x - 30, player.y);
+        } else {
+            bubbleEmitter.stop();
+        }
+
+        hpBar.width=hp*2;
+        ecoBar.width=eco*2;
+    }
+
+    // 화면 스크롤은 트랜지션 중에도 유지
     this.bg1.tilePositionX += 0.2;
     this.bg2.tilePositionX += 0.5;
     this.bg3.tilePositionX += 1;
-
-    playerVY+=500*dt;
-    player.y+=playerVY*dt;
-
-    if(player.y < 0 || player.y > GH){ hp=0; gameOver(); }
-
-    player.setTexture(time%300<150?'diver_a':'diver_b');
-
-    // 충돌 판정 및 이동
-    obstacles.getChildren().forEach(o=>{
-        o.x -= speed * o.speedX;
-        // 움직이는 수초 로직
-        if(o.isDynamic) o.y = o.startY + Math.sin(time*0.003)*30; 
-
-        if(collideHitbox(player,o)) hitObstacle.call(this, o);
-        if(o.x<-50) o.destroy();
-    });
-
-    trashGroup.getChildren().forEach(t=>{
-        t.x -= speed;
-        if(collideHitbox(player,t)){
-            t.destroy();
-            eco=Math.min(100,eco+20);
-            score += 100;
-            showFloatText.call(this, t.x, t.y, '+100', 0x00ff88);
-            playSound.call(this, 'get_item');
-        }
-        if(t.x<-50) t.destroy();
-    });
-
-    items.getChildren().forEach(i=>{
-        i.x -= speed;
-        i.y += Math.sin(time*0.005)*1;
-        if(collideHitbox(player,i)){
-            applyItem.call(this,i.itemType);
-            showFloatText.call(this, i.x, i.y, i.itemType==='turtle_item'?'SHIELD':'BOOSTER', 0xffcc00);
-            playSound.call(this, 'get_item');
-            i.destroy();
-        }
-        if(i.x<-50) i.destroy();
-    });
-
-    // 쉴드 이펙트 렌더링
-    shieldGraphics.clear();
-    if(turtle){
-        turtle.setPosition(player.x+40, player.y);
-        shieldGraphics.lineStyle(4, 0x00ff00, 0.6);
-        shieldGraphics.strokeCircle(player.x, player.y, 45);
-    }
-    
-    // 부스터 파티클 연출
-    if(dolphin){
-        dolphin.setPosition(player.x+50, player.y + Math.sin(time*0.01)*20);
-        bubbleEmitter.start();
-        bubbleEmitter.setPosition(player.x-20, player.y);
-    } else {
-        bubbleEmitter.stop();
-    }
-
-    hpBar.width=hp*2;
-    ecoBar.width=eco*2;
 }
 
 /* ================= LOGIC ================= */
-// AABB Hitbox 기반 충돌 (가장자리 25% 축소)
-function collideHitbox(a, b){
-    const b1 = a.getBounds();
-    const b2 = b.getBounds();
-    const shrink1X = b1.width * 0.25, shrink1Y = b1.height * 0.25;
-    const shrink2X = b2.width * 0.25, shrink2Y = b2.height * 0.25;
+function triggerStageClear() {
+    isTransitioning = true;
+    playerVY = 0; // 정지
+    
+    let clearTxt = this.add.text(GW/2, GH/2, 'STAGE CLEAR', { fontSize:'40px', fill:'#0f0', fontStyle:'bold' }).setOrigin(0.5).setDepth(30);
+    
+    this.time.delayedCall(1500, () => {
+        clearTxt.destroy();
+        stage++;
+        stageText.setText('STAGE: ' + stage);
+        
+        let startTxt = this.add.text(GW/2, GH/2, 'STAGE ' + stage, { fontSize:'50px', fill:'#fff', fontStyle:'bold' }).setOrigin(0.5).setDepth(30);
+        
+        this.time.delayedCall(1500, () => {
+            startTxt.destroy();
+            isTransitioning = false;
+        });
+    });
+}
 
-    const r1 = new Phaser.Geom.Rectangle(b1.x + shrink1X, b1.y + shrink1Y, b1.width - shrink1X*2, b1.height - shrink1Y*2);
-    const r2 = new Phaser.Geom.Rectangle(b2.x + shrink2X, b2.y + shrink2Y, b2.width - shrink2X*2, b2.height - shrink2Y*2);
+function collideHitbox(a, b){
+    const b1 = a.getBounds(); const b2 = b.getBounds();
+    const s1X = b1.width * 0.25, s1Y = b1.height * 0.25;
+    const s2X = b2.width * 0.25, s2Y = b2.height * 0.25;
+
+    const r1 = new Phaser.Geom.Rectangle(b1.x + s1X, b1.y + s1Y, b1.width - s1X*2, b1.height - s1Y*2);
+    const r2 = new Phaser.Geom.Rectangle(b2.x + s2X, b2.y + s2Y, b2.width - s2X*2, b2.height - s2Y*2);
     
     return Phaser.Geom.Intersects.RectangleToRectangle(r1, r2);
 }
 
 function damage(d){
-    playSound.call(this, 'hit');
+    playTone(150, 'sawtooth', 0.3);
     if(eco >= d){ eco -= d; } 
     else {
         let remaining = d - eco;
@@ -255,13 +277,26 @@ function applyItem(type){
         if(dolphin) dolphin.destroy();
         dolphin=this.add.image(player.x+50,player.y,'dolphin_active').setScale(0.6).setDepth(11);
         dolphinHP=3;
-        speedBoost=3; // 부스터 속도 강화
+        speedBoost=3;
     }
 }
 
 function spawnObstacle(time){
-    const types=['coral1','coral2','coral3','weed'];
+    const types=['coral1','coral2','coral3','weed','jelyfish'];
     const key=Phaser.Utils.Array.GetRandom(types);
+
+    if(key === 'jelyfish') {
+        let count = Math.random() > 0.5 ? Phaser.Math.Between(1, 3) : 1;
+        let baseY = Phaser.Math.Between(100, GH - 100);
+        for(let j=0; j<count; j++){
+            let o=this.add.image(GW+50 + j*60, baseY + (j*30), key);
+            o.speedX = 1.0;
+            o.isJelly = true;
+            o.startY = o.y;
+            obstacles.add(o);
+        }
+        return;
+    }
 
     const isDynamic = (key === 'weed' && Math.random() > 0.5);
     const y = key === 'weed' ? 50 : GH - 50;
@@ -270,17 +305,12 @@ function spawnObstacle(time){
     o.speedX = Phaser.Math.Between(10, 15) * 0.1; 
     o.isDynamic = isDynamic;
     o.startY = y;
-
     obstacles.add(o);
 }
 
 function spawnTrash(time){
-    // 사인파 형태로 여러 개 연달아 배치 유도
     const key = Phaser.Utils.Array.GetRandom(['trash1','trash2','trash3']);
-    trashPatternTime += 0.5;
-    const yOffset = Math.sin(trashPatternTime) * 100;
-    
-    const t=this.add.image(GW+50, GH/2 + yOffset, key);
+    const t=this.add.image(GW+50, Phaser.Math.Between(80, GH-80), key); // 랜덤 위치
     trashGroup.add(t);
 }
 
@@ -292,7 +322,8 @@ function spawnItem(){
 }
 
 function jump(){
-    if(isGameOver) return;
+    if(isGameOver || isTransitioning) return;
+    if(audioCtx.state === 'suspended') audioCtx.resume();
     playerVY=-300;
 }
 
@@ -305,27 +336,29 @@ function gameOver(){
 function restartGame(){
     this.scene.restart();
     hp=100; eco=0; score=0; stage=1;
+    playerVY=0; // 수직 낙하 버그 수정
     speedBoost=0; turtle=null; dolphin=null;
-    isGameOver=false;
+    isGameOver=false; isTransitioning=false;
 }
 
-// 텍스트 플로팅 연출
 function showFloatText(x, y, msg, color){
-    let txt = this.add.text(x, y-20, msg, { fontSize:'20px', fill:'#fff', fontStyle:'bold' }).setTint(color).setOrigin(0.5);
-    this.tweens.add({
-        targets: txt,
-        y: y-60,
-        alpha: 0,
-        duration: 800,
-        onComplete: () => txt.destroy()
-    });
+    let txt = this.add.text(x, y-20, msg, { fontSize:'20px', fill:'#fff', fontStyle:'bold' }).setTint(color).setOrigin(0.5).setDepth(25);
+    this.tweens.add({ targets: txt, y: y-60, alpha: 0, duration: 800, onComplete: () => txt.destroy() });
 }
 
-function playSound(key){
-    // 실제 사운드 파일이 로드되지 않아 생기는 콘솔 에러 방지용 체크
-    if(this.cache.audio.exists(key)) {
-        this.sound.play(key);
-    }
+// 오디오 생성 함수
+function playTone(freq, type, duration) {
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
 }
 </script>
 </body>
