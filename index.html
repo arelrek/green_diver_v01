@@ -23,18 +23,19 @@ let speedBoost=0;
 
 let hp=100, eco=0, score=0, stage=1;
 let isGameOver=false;
-let isTransitioning=false; // 스테이지 전환용 플래그
+let isShowingStageText=false;
 
 let turtle=null, dolphin=null;
-let turtleHP=0, dolphinHP=0;
+let turtleHP=0; // 돌고래는 체력 판정 없음
 
 let hpBar, ecoBar, shieldGraphics;
+let hpTextUI, ecoTextUI;
 let gameOverText, scoreText, stageText;
 
 let lastObsTime=0, lastTrashTime=0, lastItemTime=0;
 let bubbleEmitter;
+let dolphinTimer = null;
 
-// Web Audio API 설정
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
 const config = {
@@ -60,7 +61,7 @@ function preload(){
     this.load.image('coral2','assets/coral2.png');
     this.load.image('coral3','assets/coral3.png');
     this.load.image('weed','assets/weed.png');
-    this.load.image('jelyfish','assets/jelyfish.png'); // 추가
+    this.load.image('jelyfish','assets/jelyfish.png');
     this.load.image('turtle_item','assets/turtle.png');
     this.load.image('turtle_active','assets/turtle1.png');
     this.load.image('dolphin_item','assets/dolphin.png');
@@ -70,9 +71,16 @@ function preload(){
     this.load.image('trash3','assets/trash3.png');
 
     let g = this.make.graphics({x:0, y:0, add:false});
-    g.fillStyle(0xffffff, 1);
-    g.fillCircle(4,4,4);
+    g.fillStyle(0xffffff, 1); g.fillCircle(4,4,4);
     g.generateTexture('bubble', 8, 8);
+
+    // 해파리 이미지 없을 경우 대비 코드로 임시 그래픽 생성
+ //   let jg = this.make.graphics({x:0, y:0, add:false});
+  //  jg.fillStyle(0xdd88ff, 0.8);
+  //  jg.fillCircle(15, 15, 15);
+ //   jg.fillStyle(0xaa55dd, 0.8);
+ //   jg.fillRect(5, 15, 20, 10);
+//    jg.generateTexture('jelyfish_gen', 30, 30);
 }
 
 function create(){
@@ -87,21 +95,18 @@ function create(){
     items=this.add.group();
     trashGroup=this.add.group();
 
-    // 부스터 파티클 방향 수정 (왼쪽 직선, 상하 캐릭터 크기만큼 퍼짐)
     bubbleEmitter = this.add.particles(0,0,'bubble', {
-        x: 0,
-        y: { min: -20, max: 20 },
-        speedX: { min: -200, max: -400 },
-        speedY: 0,
-        scale: { start: 1, end: 0 },
-        alpha: { start: 0.6, end: 0 },
-        lifespan: 500,
-        blendMode: 'ADD',
-        emitting: false
+        x: 0, y: { min: -20, max: 20 },
+        speedX: { min: -200, max: -400 }, speedY: 0,
+        scale: { start: 1, end: 0 }, alpha: { start: 0.6, end: 0 },
+        lifespan: 500, blendMode: 'ADD', emitting: false
     });
 
     hpBar=this.add.rectangle(20,20,200,15,0x00ffcc).setOrigin(0).setDepth(20);
     ecoBar=this.add.rectangle(20,40,0,10,0x00ff88).setOrigin(0).setDepth(20);
+
+    hpTextUI=this.add.text(230,20,'HP: 100',{fontSize:'14px', fill:'#fff', fontStyle:'bold'}).setOrigin(0).setDepth(20);
+    ecoTextUI=this.add.text(230,40,'ECO: 0',{fontSize:'14px', fill:'#fff', fontStyle:'bold'}).setOrigin(0).setDepth(20);
 
     scoreText=this.add.text(GW-20,20,'SCORE: 0',{ fontSize:'24px', fill:'#fff', fontStyle:'bold' }).setOrigin(1,0).setDepth(20);
     stageText=this.add.text(GW-20,50,'STAGE: 1',{ fontSize:'20px', fill:'#ff0' }).setOrigin(1,0).setDepth(20);
@@ -119,89 +124,97 @@ function update(time,delta){
     const dt=delta/1000;
     
     // 스테이지 진행 관리
-    if (!isTransitioning) {
-        let nextTarget = stage * 500;
-        if (score >= nextTarget && stage < 10) {
-            triggerStageClear.call(this);
-            return;
-        }
-        
-        score += dt * 10;
-        scoreText.setText('SCORE: ' + Math.floor(score));
+    let nextTarget = stage * 500;
+    if (score >= nextTarget && stage < 10 && !isShowingStageText) {
+        triggerStageClear.call(this);
+    }
+    
+    score += dt * 10;
+    scoreText.setText('SCORE: ' + Math.floor(score));
 
-        baseSpeed = 2 + (stage - 1) * 0.5;
-        const obsDelay = Math.max(500, 1500 - (stage * 150));
-        const trashDelay = 2500; // 빈도 감소
-        const itemDelay = 6000;
-        const speed = baseSpeed + speedBoost;
+    baseSpeed = 2 + (stage - 1) * 0.5;
+    const obsDelay = Math.max(500, 1500 - (stage * 150));
+    const trashDelay = 2500; 
+    const itemDelay = 6000;
+    const speed = baseSpeed + speedBoost;
 
-        if(time - lastObsTime > obsDelay){ spawnObstacle.call(this, time); lastObsTime = time; }
-        if(time - lastTrashTime > trashDelay){ spawnTrash.call(this, time); lastTrashTime = time; }
-        if(time - lastItemTime > itemDelay){ spawnItem.call(this); lastItemTime = time; }
+    if(time - lastObsTime > obsDelay){ spawnObstacle.call(this, time); lastObsTime = time; }
+    if(time - lastTrashTime > trashDelay){ spawnTrash.call(this, time); lastTrashTime = time; }
+    if(time - lastItemTime > itemDelay){ spawnItem.call(this); lastItemTime = time; }
 
-        playerVY+=500*dt;
-        player.y+=playerVY*dt;
+    playerVY+=500*dt;
+    player.y+=playerVY*dt;
 
-        if(player.y < 0 || player.y > GH){ hp=0; gameOver(); }
+    if(player.y < 0 || player.y > GH){ hp=0; gameOver(); }
 
-        player.setTexture(time%300<150?'diver_a':'diver_b');
+    player.setTexture(time%300<150?'diver_a':'diver_b');
 
-        // 오브젝트 업데이트
-        obstacles.getChildren().forEach(o=>{
+    // 오브젝트 업데이트
+    obstacles.getChildren().forEach(o=>{
+        if(o.isJelly) {
+            o.x -= speed * 0.4; // 해파리 속도 낮춤
+            // 큰 곡선(0.001) + 미세한 위아래 떨림(0.005)
+            o.y = o.startY + Math.sin(time * 0.001 + o.offset) * 80 + Math.sin(time * 0.005 + o.offset) * 10;
+        } else {
             o.x -= speed * o.speedX;
             if(o.isDynamic) o.y = o.startY + Math.sin(time*0.003)*30; 
-            if(o.isJelly) o.y = o.startY + Math.sin(time*0.002 + o.x)*50; // 해파리 이동
-
-            if(collideHitbox(player,o)) hitObstacle.call(this, o);
-            if(o.x<-50) o.destroy();
-        });
-
-        trashGroup.getChildren().forEach(t=>{
-            t.x -= speed;
-            if(collideHitbox(player,t)){
-                t.destroy();
-                eco=Math.min(100,eco+20);
-                score += 100;
-                showFloatText.call(this, t.x, t.y, '+100', 0x00ff88);
-                playTone(800, 'sine', 0.1);
-            }
-            if(t.x<-50) t.destroy();
-        });
-
-        items.getChildren().forEach(i=>{
-            i.x -= speed;
-            i.y += Math.sin(time*0.005)*1;
-            if(collideHitbox(player,i)){
-                applyItem.call(this,i.itemType);
-                showFloatText.call(this, i.x, i.y, i.itemType==='turtle_item'?'SHIELD':'BOOSTER', 0xffcc00);
-                playTone(1200, 'sine', 0.15);
-                i.destroy();
-            }
-            if(i.x<-50) i.destroy();
-        });
-
-        // 애니메이션 적용
-        shieldGraphics.clear();
-        if(turtle){
-            turtle.setPosition(player.x+40, player.y);
-            shieldGraphics.lineStyle(4, 0x00ff00, 0.6);
-            let pulse = 45 + Math.sin(time * 0.01) * 5; // 보호막 크기 애니
-            shieldGraphics.strokeCircle(player.x, player.y, pulse);
-        }
-        
-        if(dolphin){
-            dolphin.setPosition(player.x+50, player.y + Math.sin(time*0.01)*20);
-            bubbleEmitter.start();
-            bubbleEmitter.setPosition(player.x - 30, player.y);
-        } else {
-            bubbleEmitter.stop();
         }
 
-        hpBar.width=hp*2;
-        ecoBar.width=eco*2;
+        if(collideHitbox(player,o)) hitObstacle.call(this, o);
+        if(o.x<-50) o.destroy();
+    });
+
+    trashGroup.getChildren().forEach(t=>{
+        t.x -= speed;
+        if(collideHitbox(player,t)){
+            t.destroy();
+            eco=Math.min(100,eco+20);
+            score += 100;
+            showFloatText.call(this, t.x, t.y, '+100', 0x00ff88);
+            playTone(800, 'sine', 0.1);
+        }
+        if(t.x<-50) t.destroy();
+    });
+
+    items.getChildren().forEach(i=>{
+        i.x -= speed;
+        i.y += Math.sin(time*0.005)*1;
+        if(collideHitbox(player,i)){
+            applyItem.call(this,i.itemType);
+            showFloatText.call(this, i.x, i.y, i.itemType==='turtle_item'?'SHIELD':'BOOSTER', 0xffcc00);
+            playTone(1200, 'sine', 0.15);
+            i.destroy();
+        }
+        if(i.x<-50) i.destroy();
+    });
+
+    // 쉴드 이펙트
+    shieldGraphics.clear();
+    if(turtle){
+        turtle.setPosition(player.x+40, player.y);
+        shieldGraphics.lineStyle(4, 0x00ff00, 0.6);
+        let pulse = 45 + Math.sin(time * 0.01) * 5; 
+        shieldGraphics.strokeCircle(player.x, player.y, pulse);
+    }
+    
+    // 부스터 이펙트
+    if(dolphin){
+        dolphin.setPosition(player.x+50, player.y + Math.sin(time*0.01)*20);
+        bubbleEmitter.start();
+        bubbleEmitter.setPosition(player.x - 30, player.y);
+    } else {
+        bubbleEmitter.stop();
     }
 
-    // 화면 스크롤은 트랜지션 중에도 유지
+    hpBar.width=hp*2;
+    ecoBar.width=eco*2;
+
+    // UI 텍스트 업데이트
+    hpTextUI.setText('HP: ' + Math.max(0, Math.floor(hp)));
+    hpTextUI.x = 20 + hpBar.width + 10;
+    ecoTextUI.setText('ECO: ' + Math.floor(eco));
+    ecoTextUI.x = 20 + ecoBar.width + 10;
+
     this.bg1.tilePositionX += 0.2;
     this.bg2.tilePositionX += 0.5;
     this.bg3.tilePositionX += 1;
@@ -209,8 +222,7 @@ function update(time,delta){
 
 /* ================= LOGIC ================= */
 function triggerStageClear() {
-    isTransitioning = true;
-    playerVY = 0; // 정지
+    isShowingStageText = true;
     
     let clearTxt = this.add.text(GW/2, GH/2, 'STAGE CLEAR', { fontSize:'40px', fill:'#0f0', fontStyle:'bold' }).setOrigin(0.5).setDepth(30);
     
@@ -223,7 +235,7 @@ function triggerStageClear() {
         
         this.time.delayedCall(1500, () => {
             startTxt.destroy();
-            isTransitioning = false;
+            isShowingStageText = false;
         });
     });
 }
@@ -254,17 +266,20 @@ function hitObstacle(o){
     o.destroy();
     showFloatText.call(this, player.x, player.y, 'HIT!', 0xff0000);
 
+    // 거북이 보호막 처리
     if(turtle){
         turtleHP--;
         if(turtleHP<=0){ turtle.destroy(); turtle=null; }
-        return;
+        return; // 보호막이 데미지 흡수
     }
+    
+    damage.call(this, 10); // 본체 피격
+
+    // 돌고래는 피격 시 해제
     if(dolphin){
-        dolphinHP--;
-        if(dolphinHP<=0){ dolphin.destroy(); dolphin=null; speedBoost=0; }
-        return;
+        dolphin.destroy(); dolphin=null; speedBoost=0;
+        if(dolphinTimer) dolphinTimer.remove();
     }
-    damage.call(this, 10);
 }
 
 function applyItem(type){
@@ -276,23 +291,30 @@ function applyItem(type){
     if(type==='dolphin_item'){
         if(dolphin) dolphin.destroy();
         dolphin=this.add.image(player.x+50,player.y,'dolphin_active').setScale(0.6).setDepth(11);
-        dolphinHP=3;
         speedBoost=3;
+        
+        // 돌고래 타이머 (8초 유지)
+        if(dolphinTimer) dolphinTimer.remove();
+        dolphinTimer = this.time.delayedCall(8000, () => {
+            if(dolphin) { dolphin.destroy(); dolphin=null; speedBoost=0; }
+        });
     }
 }
 
 function spawnObstacle(time){
-    const types=['coral1','coral2','coral3','weed','jelyfish'];
+    // jelyfish_gen 임시 텍스처 사용
+    const types=['coral1','coral2','coral3','weed','jelyfish_gen'];
     const key=Phaser.Utils.Array.GetRandom(types);
 
-    if(key === 'jelyfish') {
+    if(key === 'jelyfish_gen') {
         let count = Math.random() > 0.5 ? Phaser.Math.Between(1, 3) : 1;
-        let baseY = Phaser.Math.Between(100, GH - 100);
+        let baseY = Phaser.Math.Between(150, GH - 150);
         for(let j=0; j<count; j++){
-            let o=this.add.image(GW+50 + j*60, baseY + (j*30), key);
-            o.speedX = 1.0;
+            // 로컬에 jelyfish 파일이 있다면 'jelyfish' 키를 사용해도 됨
+            let o=this.add.image(GW+50 + j*60, baseY, key);
             o.isJelly = true;
             o.startY = o.y;
+            o.offset = j * 0.5; // 떨림 오프셋
             obstacles.add(o);
         }
         return;
@@ -310,7 +332,7 @@ function spawnObstacle(time){
 
 function spawnTrash(time){
     const key = Phaser.Utils.Array.GetRandom(['trash1','trash2','trash3']);
-    const t=this.add.image(GW+50, Phaser.Math.Between(80, GH-80), key); // 랜덤 위치
+    const t=this.add.image(GW+50, Phaser.Math.Between(80, GH-80), key); 
     trashGroup.add(t);
 }
 
@@ -322,7 +344,7 @@ function spawnItem(){
 }
 
 function jump(){
-    if(isGameOver || isTransitioning) return;
+    if(isGameOver) return;
     if(audioCtx.state === 'suspended') audioCtx.resume();
     playerVY=-300;
 }
@@ -336,9 +358,10 @@ function gameOver(){
 function restartGame(){
     this.scene.restart();
     hp=100; eco=0; score=0; stage=1;
-    playerVY=0; // 수직 낙하 버그 수정
+    playerVY=0; 
     speedBoost=0; turtle=null; dolphin=null;
-    isGameOver=false; isTransitioning=false;
+    isGameOver=false; isShowingStageText=false;
+    if(dolphinTimer) dolphinTimer.remove();
 }
 
 function showFloatText(x, y, msg, color){
@@ -346,7 +369,6 @@ function showFloatText(x, y, msg, color){
     this.tweens.add({ targets: txt, y: y-60, alpha: 0, duration: 800, onComplete: () => txt.destroy() });
 }
 
-// 오디오 생성 함수
 function playTone(freq, type, duration) {
     if(audioCtx.state === 'suspended') audioCtx.resume();
     const osc = audioCtx.createOscillator();
@@ -355,10 +377,8 @@ function playTone(freq, type, duration) {
     osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
     gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + duration);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + duration);
 }
 </script>
 </body>
