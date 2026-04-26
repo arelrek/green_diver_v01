@@ -23,9 +23,11 @@ function preload(){
     this.load.image('coral3','assets/coral3.png');
     this.load.image('weed','assets/weed.png');
 
-    this.load.image('turtle','assets/turtle.png');
-    this.load.image('dolphin','assets/dolphin.png');
+    this.load.image('turtle_item','assets/turtle.png');
+    this.load.image('turtle_active','assets/turtle1.png');
 
+    this.load.image('dolphin_item','assets/dolphin.png');
+    this.load.image('dolphin_active','assets/dolphin1.png');
     this.load.image('trash1','assets/trash1.png');
     this.load.image('trash2','assets/trash2.png');
     this.load.image('trash3','assets/trash3.png');
@@ -75,7 +77,7 @@ function update(time,delta){
 
     // 장애물
     obstacles.getChildren().forEach(o=>{
-        o.x-=o.speed;
+        o.x -= currentSpeed * o.speed;
 
         if(collide(player,o)){
             hitObstacle(o);
@@ -104,22 +106,22 @@ function update(time,delta){
         i.y+=Math.sin(time*0.005)*0.5;
 
         if(collide(player,i)){
-            applyItem(i.texture.key);
+            applyItem.call(this, i.itemType);
             i.destroy();
         }
     });
 
     // 거북이
     if(turtle){
-        turtle.x=player.x+40;
-        turtle.y=player.y;
+        turtle.setPosition(player.x+40, player.y);
     }
+
 
     // 돌고래
     if(dolphin){
-        dolphin.x=player.x+40;
-        dolphin.y=player.y+Math.sin(time*0.01)*20;
+        dolphin.setPosition(player.x+40, player.y + Math.sin(time*0.01)*20);
     }
+
 
     // UI
     hpBar.width=hp*2;
@@ -147,7 +149,7 @@ function damage(d){
 }
 
 /* ================= 장애물 충돌 ================= */
-function hitObstacle(o){
+function hitObstacle(){
 
     if(turtle){
         turtleHP--;
@@ -163,7 +165,7 @@ function hitObstacle(o){
         if(dolphinHP<=0){
             dolphin.destroy();
             dolphin=null;
-            speed=2;
+            speedBoost = 0;
         }
         return;
     }
@@ -174,15 +176,21 @@ function hitObstacle(o){
 /* ================= 아이템 ================= */
 function applyItem(type){
 
-    if(type==='turtle'){
-        turtle=this.add.image(player.x,player.y,'turtle');
-        turtleHP=3;
+    if(type==='turtle_item'){
+
+        if(turtle) turtle.destroy();
+
+        turtle = this.add.image(player.x+40, player.y, 'turtle_active');
+        turtleHP = 3;
     }
 
-    if(type==='dolphin'){
-        dolphin=this.add.image(player.x,player.y,'dolphin');
-        dolphinHP=3;
-        speed=4;
+    if(type==='dolphin_item'){
+
+        if(dolphin) dolphin.destroy();
+
+        dolphin = this.add.image(player.x+40, player.y, 'dolphin_active');
+        dolphinHP = 3;
+        speedBoost = 2; // 따로 분리
     }
 }
 
@@ -213,14 +221,14 @@ function spawnTrash(){
 }
 
 function spawnItem(){
-    const key=Math.random()>0.5?'turtle':'dolphin';
 
-    const i=this.add.image(GW+50,Phaser.Math.Between(100,300),key);
-    i.speed=2;
+    const key = Math.random()>0.5 ? 'turtle_item' : 'dolphin_item';
 
+    const i = this.add.image(GW+50, Phaser.Math.Between(100,300), key);
+
+    i.itemType = key; // ⭐ 중요
     items.add(i);
 }
-
 /* ================= 조작 ================= */
 function jump(){
     if(isGameOver) return;
